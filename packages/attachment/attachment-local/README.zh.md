@@ -35,6 +35,8 @@ kind: "package-reference"
 - name: '@deepseek-ai/dsh-attachment-local'
 ```
 
+配置 `imageWorker` 后，校验、图片读取、规范化与请求图投影在一次性独立 Node 子进程中执行。将 `imageWorker.node` 设置为可执行文件的绝对路径，将 `imageWorker.timeoutMs` 设置为正的操作时限。Linux Desktop 自动使用随附 Node，并在配置重载后保留该默认值；其他 profile 未配置时仍在进程内解码。工作进程退出会使操作失败，但不会终止 Host；插件 dispose（资源释放）会等待所属子进程关闭。存储发布仍由 Host 执行。
+
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `dshHome` | 自动解析 | 显式 harness home；省略时依次跟随 `$DSH_HOME` 与 `~/.dsh` |

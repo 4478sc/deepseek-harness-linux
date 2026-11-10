@@ -348,11 +348,18 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-attachment-local`
 
-- `source`: [`packages/attachment/attachment-local/src/index.ts:61`](../packages/attachment/attachment-local/src/index.ts)
+- `source`: [`packages/attachment/attachment-local/src/index.ts:64`](../packages/attachment/attachment-local/src/index.ts)
 
 ```ts config-catalog
 /** Local attachment backend configuration. */
 export interface Config {
+  /** Optional standalone Node worker for native image decoding; omitted runs in this process. */
+  imageWorker?: {
+    /** Absolute standalone Node executable; never Electron. */
+    node: string
+    /** Maximum duration of one image operation in milliseconds. */
+    timeoutMs: number
+  }
   /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
   dshHome?: string
   /** Maximum encoded bytes accepted for one submitted image. Default: 20 MiB. */

@@ -245,6 +245,8 @@ export interface ResolvedProfileRuntime {
 
 /** Options for {@link runProfile}. */
 export interface RunProfileOptions {
+  /** Application setup after base services are installed, before config-tree entries mount. */
+  prepare?: (ctx: Context) => void | Promise<void>
   /** This run's frozen environment snapshot, provided before any entry mounts. */
   environment: LaunchEnvironmentSnapshot
   /** The profile name to boot. */
@@ -336,6 +338,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
         exit: code => void shutdown.shutdown(code),
         ready: appReady.service,
       })
+      await options.prepare?.(hostCtx)
     })
     app.current = ctx
     if (!signalShutdown.signal.aborted

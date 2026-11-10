@@ -86,6 +86,10 @@ export function createElectronBuilderConfig(
   let windowsCode = []
   const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
     `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`]
+  // Plain Node cannot read ASAR; keep only the codec worker and its external dependencies physical.
+  if (packagesLinux) unpack.push('**/node_modules/@deepseek-ai/dsh-attachment-local/lib/image-worker.js',
+    '**/node_modules/@deepseek-ai/dsh-attachment-local/package.json',
+    '**/node_modules/sharp/**/*', '**/node_modules/@img/**/*', '**/node_modules/detect-libc/**/*', '**/node_modules/semver/**/*')
   const windowsSigner = packagesWindows && !unsigned
     ? createWindowsTokenSigner({
         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,

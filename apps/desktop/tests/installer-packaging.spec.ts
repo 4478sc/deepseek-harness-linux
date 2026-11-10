@@ -12,6 +12,16 @@ vi.mock('node:child_process', async (importOriginal) => {
 })
 
 describe('installer preparation preserves application dependencies', () => {
+  it('unpacks standalone image worker code and Sharp dependencies on Linux', async () => {
+    const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
+    const config = createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: 'com.example.images', DSH_DESKTOP_TARGET_PLATFORM: 'linux', DSH_DESKTOP_TARGET_ARCH: 'x64',
+      DSH_DESKTOP_AUTO_UPDATE_ENV: 'test', DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
+      DOWNLOAD_TEST_ORIGIN: 'https://updates.example.com', DOWNLOAD_TEST_RELEASE_ID: '0123456789abcdef0123456789abcdef',
+    }, 'linux', 'x64')
+    expect(config.asarUnpack).toContain('**/node_modules/@deepseek-ai/dsh-attachment-local/lib/image-worker.js')
+    for (const name of ['sharp', '@img', 'detect-libc', 'semver']) expect(config.asarUnpack).toContain('**/node_modules/' + name + '/**/*')
+  })
   it.each(['win32', 'darwin'] as const)('rejects a missing production policy before signing on %s', async (platform) => {
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
     expect(() => createElectronBuilderConfig({ DSH_DESKTOP_APP_ID: 'com.example.installer',

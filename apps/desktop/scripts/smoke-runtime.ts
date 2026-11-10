@@ -95,6 +95,19 @@ export function apply(ctx) {
   if (!(ctx instanceof Context)) throw new Error('desktop runtime: external plugin loaded another Cordis instance')
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/desktop-smoke',
     handler(_request, response) { response.end('plugin route ready') } }))
+  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/desktop-smoke-images',
+    async handler(_request, response) {
+      try {
+        const data = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+        const ref = await ctx.attachments.saveImage({ data, mediaType: 'image/png' })
+        const stored = await ctx.attachments.readImage(ref)
+        const projected = await ctx.attachments.readImageRequest(ref, { width: 1, height: 1, maxBytes: 4096 })
+        response.end(JSON.stringify({ width: stored.ref.width, projectedWidth: projected.width }))
+      } catch (error) {
+        response.statusCode = 500
+        response.end(inspect(error, { depth: 5 }))
+      }
+    } }))
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/desktop-smoke-install',
     async handler(_request, response) {
       try {
@@ -138,7 +151,7 @@ export function apply(ctx) {
   }
 }
 `)
-    writeFileSync(join(plugin, 'bundle.yml'), '- insert:\n    - id: desktop-runtime-smoke-plugin\n      name: desktop-runtime-smoke-plugin\n      inject: [webServer, officeToPdf, skills, pluginManager]\n')
+    writeFileSync(join(plugin, 'bundle.yml'), '- insert:\n    - id: desktop-runtime-smoke-plugin\n      name: desktop-runtime-smoke-plugin\n      inject: [webServer, officeToPdf, skills, pluginManager, attachments]\n')
     cpSync(plugin, join(profile, 'node_modules', pluginName), { recursive: true })
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
@@ -168,6 +181,14 @@ export function apply(ctx) {
     if (!installation.ok || !installed.ok || await installed.text() !== 'installed plugin ready') {
       throw new Error(`desktop runtime: bundled pnpm plugin installation failed: ${installationResult}`)
     }
+    const images = await fetch(new URL('/desktop-smoke-images', ready.url), {
+      headers: { cookie }, signal: AbortSignal.timeout(60_000),
+    })
+    const imageResult = await images.text()
+    if (!images.ok || imageResult !== JSON.stringify({ width: 1, projectedWidth: 1 })) {
+      throw new Error('desktop runtime: image save/read/projection failed: ' + imageResult)
+    }
+    console.log('desktop runtime: image save, read and projection passed after plugin configuration reload')
     if (skipOfficeConversion) {
       // The packaged Linux app carries no LibreOffice Kit native modules, so these checks
       // cannot pass there by construction. Skip them instead of failing: a build that

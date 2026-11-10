@@ -1,9 +1,12 @@
 /** Local durable attachment backend rooted below `DSH_HOME`. @module @deepseek-ai/dsh-attachment-local */
 
 import { join } from 'node:path'
+import { ImageWorkerClient } from './image-worker-client.ts'
+import { workerImage, workerProjection } from './image-worker-protocol.ts'
+import type { PreparedImageFile } from './store.ts'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import { AttachmentError, AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type {
   FileAttachmentRef,
   ImageAttachmentLimits,
@@ -59,6 +62,13 @@ export const MAX_IMAGE_COMPRESSION_CONCURRENCY = 8
 
 /** Local attachment backend configuration. */
 export interface Config {
+  /** Optional standalone Node worker for native image decoding; omitted runs in this process. */
+  imageWorker?: {
+    /** Absolute standalone Node executable; never Electron. */
+    node: string
+    /** Maximum duration of one image operation in milliseconds. */
+    timeoutMs: number
+  }
   /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
   dshHome?: string
   /** Maximum encoded bytes accepted for one submitted image. Default: 20 MiB. */
@@ -146,6 +156,7 @@ class SharedRequest<T> {
 /** Persistent content-addressed local attachment store. */
 export class LocalAttachmentStore extends AttachmentStore {
   static Config: z<Config> = z.object({
+    imageWorker: z.object({ node: z.string().min(1).required(), timeoutMs: z.number().step(1).min(1).required() }),
     dshHome: z.string(),
     maxImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_IMAGE_BYTES),
     maxImagesPerMessage: z.number().step(1).min(1).default(DEFAULT_MAX_IMAGES_PER_MESSAGE),
@@ -166,12 +177,15 @@ export class LocalAttachmentStore extends AttachmentStore {
   readonly normalizationPolicy: Readonly<NormalizationPolicy>
   /** Resolved instance-level compression limit. */
   readonly imageCompressionConcurrency: number
+  private readonly imageWorker: ImageWorkerClient | undefined
   private readonly cacheRoot: string
   private readonly compression: CompressionLimiter
   private readonly requestInflight = new Map<string, SharedRequest<RequestImageAttachment>>()
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
+    this.imageWorker = config.imageWorker === undefined ? undefined : new ImageWorkerClient(config.imageWorker)
+    ctx.effect(() => async () => { await this.imageWorker?.dispose() })
     const dshHome = resolveDshHome(config.dshHome)
     this.root = join(dshHome, 'attachments', 'v1')
     this.cacheRoot = dshCachePath({ dshHome }, 'attachments')
@@ -201,28 +215,45 @@ export class LocalAttachmentStore extends AttachmentStore {
   }
 
   async validateImage(input: SaveImageAttachment): Promise<void> {
-    await this.compression.run(() => validateImageFile(input, this.imageLimits, this.normalizationPolicy))
+    await this.compression.run(() => this.imageWorker === undefined
+      ? validateImageFile(input, this.imageLimits, this.normalizationPolicy)
+      : this.prepareImage(input).then(() => undefined))
   }
 
   override async saveImages(inputs: readonly SaveImageAttachment[]): Promise<readonly ImageAttachmentRef[]> {
     this.validateImageBatch(inputs)
     const prepared = await Promise.all(inputs.map(input => this.compression.run(
-      () => prepareImageFile(input, this.imageLimits, this.normalizationPolicy),
+      () => this.prepareImage(input),
     )))
     const refs: ImageAttachmentRef[] = []
     for (const image of prepared) refs.push(await commitPreparedImageFile(this.root, image))
     return refs
   }
 
+  private async prepareImage(input: SaveImageAttachment): Promise<PreparedImageFile> {
+    if (this.imageWorker === undefined) return prepareImageFile(input, this.imageLimits, this.normalizationPolicy)
+    this.validateImageBatch([input])
+    if (input.data.byteLength > this.imageLimits.maxImageBytes) {
+      throw new AttachmentError('Image exceeds the configured encoded-byte limit.', 'IMAGE_TOO_LARGE')
+    }
+    return workerImage(await this.imageWorker.run({ operation: 'prepare',
+      input: { ...input,
+        data: Buffer.from(input.data).toString('base64') },
+      limits: this.imageLimits,
+      policy: this.normalizationPolicy }))
+  }
+
   async saveImage(input: SaveImageAttachment): Promise<ImageAttachmentRef> {
     const prepared = await this.compression.run(
-      () => prepareImageFile(input, this.imageLimits, this.normalizationPolicy),
+      () => this.prepareImage(input),
     )
     return commitPreparedImageFile(this.root, prepared)
   }
 
   async readImage(ref: ImageAttachmentRef, signal?: AbortSignal): Promise<StoredImageAttachment> {
-    return readImageFile(this.root, ref, signal)
+    const worker = this.imageWorker
+    if (worker === undefined) return readImageFile(this.root, ref, signal)
+    return this.compression.run(async () => workerImage(await worker.run({ operation: 'read', root: this.root, ref }, signal)))
   }
 
   override imageHostPath(ref: ImageAttachmentRef): string {
@@ -269,6 +300,12 @@ export class LocalAttachmentStore extends AttachmentStore {
     }
     if (operation === undefined) {
       const shared = new SharedRequest<RequestImageAttachment>(sharedSignal => this.compression.run(async () => {
+        if (this.imageWorker !== undefined) return workerProjection(await this.imageWorker.run({ operation: 'request',
+          root: this.root,
+          cacheRoot: this.cacheRoot,
+          ref,
+          target },
+        sharedSignal))
         const request = await readRequestImageFile(
           this.cacheRoot,
           stored ?? await this.readImage(ref, sharedSignal),
