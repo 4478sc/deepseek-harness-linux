@@ -14,6 +14,7 @@ import { installDesktopUpdateTaskControl } from './update-tasks.ts'
 import { installDesktopQuitInspection } from './quit-inspection.ts'
 import { installPlatformSessionPublisher } from './platform-session.ts'
 import { installOfficeEngineResolution } from './office-engine.ts'
+import { configureImageWorker } from './image-worker.ts'
 
 async function main(): Promise<void> {
   const runtimeDir = process.argv[2] as string
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   const application = runProfile({
     environment: loadLayeredEnv('dsh'),
     profile: 'desktop',
+    prepare: (ctx) =>{  configureImageWorker(ctx, process.argv[4] ?? join(runtimeDir, '..', 'runtime', 'primary-runtime'), process.platform) },
     resolvedProfile: { profile, installAnchor },
     patchFiles: [],
     args: ['--no-open', '--host', '127.0.0.1', '--port', '0'],

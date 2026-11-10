@@ -35,6 +35,8 @@ Mount the plugin with no required configuration. The defaults below define what 
 - name: '@deepseek-ai/dsh-attachment-local'
 ```
 
+When `imageWorker` is configured, validation, image reads, normalization, and request projections run in one-shot standalone Node subprocesses. Set `imageWorker.node` to an absolute executable path and `imageWorker.timeoutMs` to a positive operation deadline. Linux Desktop supplies its bundled Node automatically and keeps that default across configuration reloads; other profiles keep in-process decoding unless configured. Worker termination rejects the operation without terminating the Host, and plugin disposal waits for owned children to close. Storage publication remains in the Host.
+
 | Field | Default | Meaning |
 |---|---|---|
 | `dshHome` | resolved | Explicit harness home; omitted follows `$DSH_HOME`, then `~/.dsh` |
