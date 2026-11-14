@@ -2,6 +2,7 @@
 
 import { join } from 'node:path'
 import { ImageWorkerClient } from './image-worker-client.ts'
+import type { ImageWorkerConfig } from './image-worker-client.ts'
 import { workerImage, workerProjection } from './image-worker-protocol.ts'
 import type { PreparedImageFile } from './store.ts'
 import { Context } from '@deepseek-ai/cordis'
@@ -69,9 +70,9 @@ export interface Config {
   /** Optional standalone Node worker for native image decoding; omitted runs in this process. */
   imageWorker?: {
     /** Absolute standalone Node executable; never Electron. */
-    node: string
+    node?: string
     /** Maximum duration of one image operation in milliseconds. */
-    timeoutMs: number
+    timeoutMs?: number
   }
   /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
   dshHome?: string
@@ -157,10 +158,28 @@ class SharedRequest<T> {
   }
 }
 
+/**
+ * Read the optional image worker configuration.
+ * @param config - Declared worker fields; omitted or empty leaves decoding in process.
+ * @returns the complete worker configuration, or undefined when none is configured.
+ * @throws If only one of `node` and `timeoutMs` is set.
+ */
+function resolveImageWorker(config: Config['imageWorker']): ImageWorkerConfig | undefined {
+  if (config === undefined) return undefined
+  const { node, timeoutMs } = config
+  if (node === undefined && timeoutMs === undefined) return undefined
+  if (node === undefined || timeoutMs === undefined) {
+    throw new Error('attachment-local: imageWorker requires both node and timeoutMs')
+  }
+  return { node, timeoutMs }
+}
+
 /** Persistent content-addressed local attachment store. */
 export class LocalAttachmentStore extends AttachmentStore {
   static Config: z<Config> = z.object({
-    imageWorker: z.object({ node: z.string().min(1).required(), timeoutMs: z.number().step(1).min(1).required() }),
+    // Both fields are optional here so an omitted worker configuration resolves to `{}`
+    // instead of failing the required-field check; the constructor rejects a half-set pair.
+    imageWorker: z.object({ node: z.string(), timeoutMs: z.number().step(1).min(1) }),
     dshHome: z.string(),
     maxImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_IMAGE_BYTES),
     maxImagesPerMessage: z.number().step(1).min(1).default(DEFAULT_MAX_IMAGES_PER_MESSAGE),
@@ -188,7 +207,8 @@ export class LocalAttachmentStore extends AttachmentStore {
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
-    this.imageWorker = config.imageWorker === undefined ? undefined : new ImageWorkerClient(config.imageWorker)
+    const imageWorkerConfig = resolveImageWorker(config.imageWorker)
+    this.imageWorker = imageWorkerConfig === undefined ? undefined : new ImageWorkerClient(imageWorkerConfig)
     ctx.effect(() => async () => { await this.imageWorker?.dispose() })
     const dshHome = resolveDshHome(config.dshHome)
     this.root = join(dshHome, 'attachments', 'v1')
