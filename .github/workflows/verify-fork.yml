@@ -32,8 +32,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Same pin as the upstream Linux lanes (package.json requires Node >= 24.9.0).
-  NODE_VERSION: '24.9'
+  # The upstream Linux lanes use the `24` channel; package.json requires >= 24.9.0, and the
+  # 24.9.0 patch release breaks the dev-server loader the HMR snapshot drives.
+  NODE_VERSION: '24'
 
 jobs:
   typecheck-and-lint:
