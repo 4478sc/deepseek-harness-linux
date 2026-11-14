@@ -15,6 +15,15 @@ name: Fork verification
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      baseline:
+        description: Compare the failing benchmark lane against the fixed upstream tag.
+        type: boolean
+        default: false
+      upstream_ref:
+        description: Upstream tag to check out for the baseline comparison.
+        type: string
+        default: dsh-v0.2.2-rc.3
 
 permissions:
   contents: read
@@ -81,3 +90,78 @@ jobs:
         env:
           DSH_GATE_VERBOSE: '1'
         run: pnpm run check:ci:bench
+
+  # Baseline comparison for one failing lane. The upstream tag is checked out in a
+  # separate git worktree inside the runner workspace, so both trees build their own
+  # dependencies from their own lockfile and run the identical command.
+  baseline-bench:
+    name: baseline benchmark (${{ matrix.tree }})
+    if: github.event_name == 'workflow_dispatch' && inputs.baseline == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [fork, upstream]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the fixed upstream tag in a worktree
+        if: matrix.tree == 'upstream'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/${{ inputs.upstream_ref }}:refs/tags/baseline-upstream"
+          git worktree add ../baseline "refs/tags/baseline-upstream"
+          git -C ../baseline rev-parse HEAD
+
+      - name: Record the checked-out commit
+        id: tree
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.tree }}" = "upstream" ]; then
+            echo "dir=../baseline" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git -C ../baseline rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=." >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.9'
+
+      - name: Install (immutable)
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Install benchmark browser
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: pnpm --filter @deepseek-ai/dsh-benchmarks exec playwright install --with-deps chromium
+
+      - name: Build benchmark artifacts
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: |
+          set -euo pipefail
+          pnpm run build:bench
+          pnpm run build:web
+
+      - name: Run the exact failing benchmark file
+        id: bench
+        working-directory: ${{ steps.tree.outputs.dir }}
+        continue-on-error: true
+        env:
+          DSH_GATE_VERBOSE: '1'
+        run: |
+          set -uo pipefail
+          pnpm exec vitest bench --config vitest.bench.config.ts --run benchmarks/long-session-browser/long-session.bench.ts
+          echo "bench_exit=$?"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "tree=${{ matrix.tree }} sha=${{ steps.tree.outputs.sha }} bench_outcome=${{ steps.bench.outcome }}"
