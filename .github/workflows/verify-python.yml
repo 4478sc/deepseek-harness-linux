@@ -7,6 +7,10 @@ name: Fork python
 
 on:
   workflow_dispatch:
+  # Runs once per change to this file so the workflow registers and proves the lane.
+  pull_request:
+    paths:
+      - '.github/workflows/verify-python.yml'
 
 permissions:
   contents: read
