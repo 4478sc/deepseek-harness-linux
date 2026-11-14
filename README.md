@@ -1,129 +1,90 @@
 # DeepSeek Harness · Linux Desktop
 
+Community Linux packaging for the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) desktop application. This repository is a downstream fork: it adds AppImage, Debian `.deb` and portable `.tar.gz` packaging for Linux on x64 and arm64, keeps upstream's agents and plugins intact, and tracks upstream releases.
+
 English | [中文](README.zh.md)
 
-> Community Linux desktop packaging for the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) desktop app: an open-source (MIT) DeepSeek desktop client that installs and updates on Linux, shipped as AppImage, Debian `.deb` and portable `.tar.gz` for x64 and arm64, with native CI and AppImage auto-updates.
+## What this is
 
-**In one line**: a DeepSeek desktop client for Linux that you can download, install and update (DeepSeek desktop for Linux). Every agent, plugin and network capability of the official build stays; you can run `dsh web` locally or install the native desktop client, and your data stays on the machine.
+- A **packaging and distribution** layer for Linux, not a rewrite of the harness. The agent loop, plugins, protocols and Web UI come from upstream unchanged.
+- Built from upstream `dsh-v0.2.2-rc.3` (`38a6a5c965aa99ab525161efb7cc5cf1fe62fced`) plus this fork's Linux work.
+- Ships three formats per architecture: AppImage (auto-update), Debian package, portable tarball.
 
-The official desktop ships macOS and Windows only. Linux users either fall back to the Web UI or build from source. This repository closes that gap: it packages, tests and distributes Linux as a community-supported platform without removing any official desktop feature.
+## What this is not
 
-## What this is, and what it is not
+- Not an official DeepSeek product. Issues about the harness itself belong upstream.
+- No telemetry endpoint of its own, no cloud account, no hosted service.
 
-- **It is** a downstream fork with one job: make the dsh desktop app downloadable, installable and updatable on Linux.
-- **It is not** an official DeepSeek project, and it does not modify the agent core. Agent behaviour, the plugin system and the wire protocol follow upstream.
+## Install
 
-## Highlights
+Download the artifact for your architecture from [Releases](https://github.com/4478sc/DSH_Linux/releases) (published by the source repository until a release is cut here).
 
-- **Native Linux support**: a downstream project that provides community Linux desktop packaging for the official DeepSeek desktop app, on Ubuntu, Debian, Raspberry Pi 5 and ARM servers.
-- **Three package formats**: AppImage (single file, no install, supports auto-update), Debian `.deb` (native package management), and portable `.tar.gz`. Only the AppImage updates itself; `.deb` and `.tar.gz` are replaced by downloading a newer build.
-- **Auto-update**: the AppImage uses `electron-updater` over HTTPS and verifies the downloaded artifact against the **sha512** recorded in the update descriptor (yml).
-- **Complete features**: agent core, plugin system, network access and the Web frontend follow upstream, so Linux matches the official experience except Office document conversion.
-- **Self-hosted**: run `dsh web` locally or install the desktop client; data stays on the machine, which suits privacy-sensitive and intranet deployments.
-- **Open source and free**: distributed under the upstream MIT licence.
-
-## Artifacts
-
-Every build emits three package formats per architecture:
-
-| Format | Use | Typical filename |
-|--------|-----|------------------|
-| **AppImage** | Single file, no install, auto-update | `deepseek-harness-<version>-linux-x64.AppImage` |
-| **.deb** | Debian / Ubuntu package management | `deepseek-harness-<version>-linux-amd64.deb` |
-| **.tar.gz** | Portable, unpack and run | `deepseek-harness-<version>-linux-x64.tar.gz` |
-
-> Replace `<version>` with the release you install (currently `0.2.2-rc.3`).
-
-Supported architectures: `x64` (AMD / Intel) and `arm64` (Raspberry Pi 5, Linux on Apple Silicon, ARM servers).
-
-## Quick start
-
-### Option 1: AppImage (recommended, supports auto-update)
-
-1. Download the `.AppImage` for your architecture from [Releases](https://github.com/4478sc/deepseek-harness-linux/releases).
-2. Install the runtime dependency; AppImage needs FUSE 2:
-   ```sh
-   sudo apt install libfuse2          # Debian / Ubuntu; libfuse2t64 on 24.04 and later
-   # Fedora / RHEL: sudo dnf install fuse2
-   ```
-3. Make it executable and run it:
-   ```sh
-   chmod +x deepseek-harness-*-linux-x64.AppImage
-   ./deepseek-harness-*-linux-x64.AppImage
-   ```
-
-### Option 2: .deb
+AppImage:
 
 ```sh
-sudo dpkg -i deepseek-harness-*-linux-x64.deb
-deepseek-harness            # or start it from the application menu
+sudo apt install libfuse2          # Debian / Ubuntu; libfuse2t64 on 24.04 and later
+# Fedora / RHEL: sudo dnf install fuse2
+chmod +x deepseek-harness-*-linux-x64.AppImage
+./deepseek-harness-*-linux-x64.AppImage
 ```
 
-### Option 3: .tar.gz (portable)
+Debian package:
+
+```sh
+sudo dpkg -i deepseek-harness-*-linux-amd64.deb
+deepseek-harness
+```
+
+Portable tarball:
 
 ```sh
 tar -xzf deepseek-harness-*-linux-x64.tar.gz
 cd deepseek-harness-*-linux-x64
-./deepseek-harness          # the launcher inside the unpacked directory
+./deepseek-harness
 ```
 
-> On a headless machine (a remote server with VNC, for example) set `DISPLAY` first, such as `:1` under xfce4 with TigerVNC; the desktop starts on its own.
+In a headless environment set `DISPLAY` (for example `:1` under xfce4 + TigerVNC) before starting the desktop client.
 
-## Building from source
+## Build from source
 
-You need Node.js >= 24.9, pnpm 11.28.5 (pinned by `packageManager`), and `libfuse2` on the build host for AppImage assembly (`libfuse2t64` on Ubuntu 24.04+ and Debian 13).
+Requirements: Node.js >= 24.9, pnpm 11.28.5 (pinned by `packageManager`), and `libfuse2` on the build host for the AppImage target.
 
 ```sh
-git clone https://github.com/4478sc/deepseek-harness-linux.git
-cd deepseek-harness-linux
-pnpm install
-cp apps/desktop/.env.linux.example apps/desktop/.env.linux   # fill in release settings as needed
-pnpm --dir apps/desktop run package:linux:x64                # x64
-pnpm --dir apps/desktop run package:linux:arm64              # arm64
+pnpm install --frozen-lockfile
+pnpm run package:linux:x64     # or package:linux:arm64
 ```
 
-Self-hosted Web mode (`dsh web`) reads the `lib/` output of every workspace package: a fresh checkout fails to start because typert-loader cannot find `lib/typert.host.js` and reports `ERR_MODULE_NOT_FOUND`, so run `pnpm run build:official` first.
+The packages land in `apps/desktop/.desktop-build/targets/linux-<arch>/artifacts`. Variants with `:dir` only produce the unpacked directory. Linux builds are unsigned and read `.env.linux` only (`apps/desktop/.env.linux.example`).
 
-The `Desktop (Linux)` workflow builds both architectures on native runners (`ubuntu-24.04` and `ubuntu-24.04-arm`); artifacts appear under Actions Artifacts or in the release it attaches.
+## Upstream provenance and this fork's changes
 
-## Auto-update
+Source of truth: [4478sc/deepseek-harness-linux](https://github.com/4478sc/deepseek-harness-linux), branch `upgrade/0.2.2-rc.3`, plus the Linux packaging history behind it. This repository was imported from that repository at commit `1281e8d2e812c55d97c577f574e38df4628d33a0` (PR #2 head, base `2ba014261c86c` on `master`).
 
-The AppImage updates through the `electron-updater` AppImage channel, with `nightly-linux.yml` as its descriptor, over HTTPS. These builds are unsigned, so an update trusts HTTPS and the feed metadata only and verifies no code signature; do not rely on it in high-trust environments.
+Fork-specific additions:
 
-`electron-updater` verifies the **sha512** recorded in the descriptor. For a manual download, check the `SHA256SUMS.txt` published with the release.
+- Electron Builder targets for AppImage, `.deb` and `.tar.gz`, plus Linux CI lanes and smoke tests.
+- An isolated image worker for Linux: native image decoding runs in a one-shot standalone Node process instead of Electron, which avoids the libvips crash on Linux.
+- Auto-update channel wiring for the Linux feed, with self-hosted publishing kept opt-in.
 
-## Known limitations
+## Compatibility
 
-1. **Unsigned**: Linux builds carry no code signature. This is a community build; verify the checksums published with each release.
-2. **No Office document conversion**: in-app DOCX / XLSX / PPTX to PDF conversion needs the Linux native bindings of LibreOffice Kit, which this build does not ship yet, so that feature is unavailable on Linux. The remaining desktop features (agent, skills, network access, frontend) work.
-3. **Upstream is in developer preview**: the official project moves fast and breaks compatibility, so this repository keeps rebasing onto upstream.
-4. **No notarization and no store listing**: no system notarization and no app store process.
+- Linux x64 and arm64. CI builds and smoke-tests both; arm64 has not been run on physical ARM hardware.
+- Node 24 and pnpm 11.28.5, matching upstream's toolchain floor.
+- Upstream's desktop features are all present; Office document conversion depends on the upstream office runtime bundle.
 
-## Relationship to upstream
+## Verification status
 
-- Upstream: [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (MIT, DeepSeek-AI).
-- This repository is its downstream fork. Deliberate changes stay in the Linux port: CI workflows, the electron-builder configuration, type declaration completion, POSIX launcher compatibility, desktop packaging documentation and smoke-test scripts.
-- Differences outside that port come from version lag and are not yet reconciled commit by commit: this repository rebases onto upstream on the release-candidate cadence, so a lagging branch lacks some upstream files. See each release's notes for the baseline commit behind a version, and do not assume the core tracks upstream commit for commit.
-- The intent is to feed the Linux packaging experience back upstream as a reference.
+What has been run, and what has not:
+
+- Type-check (`tsc -b`), lint and duplication, the 67 static gates, the recorded snapshot gate, the artifact gate, the consumer aggregate and the benchmark lane pass on GitHub-hosted `ubuntu-24.04` through the fork's verification workflows.
+- Coverage is **not green**: on a four-core hosted runner the suite still hits test timeouts (13 at the 90 s budget, the same budget upstream grants) and cannot finish; the fork-specific branch coverage was fixed (the attachment store file is at 100% locally), the remaining gap is runner capacity.
+- The Python `--scenario all --installed-wheel` lane fails on both this fork and the upstream tag in the same environment, so it is recorded as an upstream-level failure rather than a fork regression.
+- Windows checks, Issue-policy checks and real ARM hardware remain untested.
 
 ## Security
 
-- Read the upstream [SAFETY.md](https://github.com/deepseek-ai/deepseek-harness/blob/master/SAFETY.md) before running it.
-- Unsigned binaries carry supply-chain risk: download only from this repository's releases and check the SHA256 sums.
-- The update channel verifies no code signature; it relies on HTTPS and the feed metadata.
-
-## Looking for this?
-
-If you are searching for any of these, this is the project:
-
-- **DeepSeek Linux** / **DeepSeek on Linux** / **DeepSeek desktop Linux**
-- **DeepSeek client download** / **DeepSeek desktop client** / **DeepSeek desktop for Linux**
-- **DeepSeek AppImage** / **DeepSeek .deb** / **Ubuntu DeepSeek** / **Debian install DeepSeek**
-- **Raspberry Pi DeepSeek** / **ARM64 DeepSeek** / **DeepSeek Linux installer**
-- **open-source DeepSeek client** / **self-hosted DeepSeek** / **Linux AI assistant**
-
-> This is a **desktop client**: model capability comes from the official DeepSeek API. It bundles no offline model and does not run one locally. To use a self-hosted or third-party endpoint, configure it in the client.
+Binaries are unsigned; verify the published checksums. The application keeps data on the local machine and contacts only the model endpoints you configure.
 
 ## Licence
 
-Distributed under the upstream **MIT** licence. DeepSeek Harness is developed by DeepSeek-AI and its copyright belongs to them; the Linux packaging layer is added under the same MIT licence. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT, inherited from upstream. The `LICENSE` file in this repository is the one this repository was created with and is unchanged.
