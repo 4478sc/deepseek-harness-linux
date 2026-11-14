@@ -102,12 +102,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tree: [fork, upstream]
+        tree: [fork, upstream, fork-no-attachment]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      # Root-cause probe: keep everything from the fork except PR #1's attachment
+      # package, to show whether that package alone changes the benchmark outcome.
+      - name: Revert the attachment package to the upstream tag
+        if: matrix.tree == 'fork-no-attachment'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/${{ inputs.upstream_ref }}:refs/tags/baseline-upstream"
+          git checkout refs/tags/baseline-upstream -- packages/attachment/attachment-local
+          git status --porcelain | head
 
       - name: Check out the fixed upstream tag in a worktree
         if: matrix.tree == 'upstream'
@@ -124,6 +134,9 @@ jobs:
           if [ "${{ matrix.tree }}" = "upstream" ]; then
             echo "dir=../baseline" >> "$GITHUB_OUTPUT"
             echo "sha=$(git -C ../baseline rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          elif [ "${{ matrix.tree }}" = "fork-no-attachment" ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)-without-attachment-package" >> "$GITHUB_OUTPUT"
           else
             echo "dir=." >> "$GITHUB_OUTPUT"
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
