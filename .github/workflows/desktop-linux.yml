@@ -1,0 +1,417 @@
+# Package the Linux Desktop application (AppImage, deb, tar.gz) and publish it to a
+# self-hosted update server.
+#
+# The upstream release pipeline targets macOS and Windows only; this workflow owns the
+# Linux packaging path. Three jobs, each with one responsibility:
+#
+#   check   - validate the packaging configuration and toolchain (also runs on pull requests)
+#   package - build one architecture per matrix leg: AppImage (the auto-update carrier),
+#             Debian .deb, and portable tar.gz
+#   publish - push both feeds to the self-hosted server; an operator must start the run by
+#             hand, set publish_selfhost, and set the DSH_SELFHOST_PUBLISH variable
+#
+# Packaging never uploads anything. The self-hosted deployment stays a supported setting so a
+# fork can publish on its own server during a maintenance window, but no push or pull-request
+# run contacts an upload endpoint, and a prerelease build is never promoted to the stable
+# channel.
+#
+# Linux builds carry no code-signing stage. Nothing references Tencent COS: the
+# self-hosted deployment publishes over SSH through apps/desktop/scripts/upload-selfhosted.mjs.
+name: Desktop (Linux)
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'apps/desktop/**'
+      - '.github/workflows/desktop-linux.yml'
+      - '.github/actions/**'
+      # A version bump rewrites the workspace root manifest and every member of the dsh
+      # family; without this, bumping versions produced no build at all.
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - '.github/workflows/desktop-linux.yml'
+      - '.github/actions/**'
+      # A version bump rewrites the workspace root manifest and every member of the dsh
+      # family; without this, bumping versions produced no build at all.
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: HTTPS origin of the self-hosted update server.
+        required: false
+        default: https://sswwgzs.cn
+      publish_selfhost:
+        description: Publish both Linux feeds to the self-hosted server. Requires an operator window.
+        required: false
+        type: boolean
+        default: false
+      attach_release:
+        description: Attach the packaged Linux artifacts to the GitHub release for this version.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  PRIMARY_NODE_VERSION: '24.9.0'
+  DSH_TELEMETRY_DISABLED: '1'
+  # Origin and directory of the self-hosted feed. Override per run with workflow_dispatch,
+  # or permanently with the DSH_SELFHOST_ORIGIN / DSH_SELFHOST_PREFIX repository variables.
+  SELFHOST_ORIGIN: ${{ inputs.origin || vars.DSH_SELFHOST_ORIGIN || 'https://sswwgzs.cn' }}
+  SELFHOST_PREFIX: ${{ vars.DSH_SELFHOST_PREFIX || 'dsh' }}
+
+jobs:
+  check:
+    name: Validate Linux packaging configuration
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          clean: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Configure pnpm store path
+        id: pnpm-store
+        run: |
+          store_root="$HOME/.local/share/pnpm/store"
+          echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
+          store_path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)
+          echo "path=$store_path" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - uses: ./.github/actions/prepare-linux-env
+        with:
+          origin: ${{ env.SELFHOST_ORIGIN }}
+          prefix: ${{ env.SELFHOST_PREFIX }}
+
+      # The preflight in check:package probes FUSE 2.
+      - name: Install AppImage build dependencies
+        run: |
+          sudo apt-get update
+          # FUSE 2 was renamed libfuse2t64 on Ubuntu 24.04 / Debian 13 (the 64-bit time_t
+          # transition); installing only the legacy name fails on those runners. Try the new
+          # name first and fall back to the old one so jammy and noble both resolve it.
+          sudo apt-get install -y --no-install-recommends libfuse2t64 2>/dev/null \
+            || sudo apt-get install -y --no-install-recommends libfuse2
+
+      - name: Validate packaging configuration and toolchain
+        run: pnpm --dir apps/desktop run check:package
+
+  package:
+    name: Package Linux ${{ matrix.arch }} (AppImage + deb + tar.gz)
+    runs-on: ${{ matrix.runs-on }}
+    needs: check
+    # Pull requests validate configuration only; full packaging runs where artifacts are wanted.
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners: cross-building arm64 on x64 hosts risks silently unusable native modules.
+          - arch: x64
+            runs-on: ubuntu-24.04
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    steps:
+      # Complete history: the release scripts read tags.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          clean: true
+
+      - name: Configure runner-private caches
+        run: |
+          echo "NODE_COMPILE_CACHE=${{ runner.temp }}/node-compile-cache" >> "$GITHUB_ENV"
+          echo "npm_config_devdir=${{ runner.temp }}/node-gyp" >> "$GITHUB_ENV"
+          echo "TMPDIR=${{ runner.temp }}" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Configure pnpm store path
+        id: pnpm-store
+        run: |
+          store_root="$HOME/.local/share/pnpm/store"
+          echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
+          store_path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)
+          echo "path=$store_path" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      # electron-builder's AppImage tool requires FUSE2 at build time on Ubuntu 24.04 runners.
+      - name: Install AppImage build dependencies
+        run: |
+          sudo apt-get update
+          # FUSE 2 was renamed libfuse2t64 on Ubuntu 24.04 / Debian 13 (the 64-bit time_t
+          # transition); installing only the legacy name fails on those runners. Try the new
+          # name first and fall back to the old one so jammy and noble both resolve it.
+          sudo apt-get install -y --no-install-recommends libfuse2t64 2>/dev/null \
+            || sudo apt-get install -y --no-install-recommends libfuse2
+
+      - uses: ./.github/actions/prepare-linux-env
+        with:
+          origin: ${{ env.SELFHOST_ORIGIN }}
+          prefix: ${{ env.SELFHOST_PREFIX }}
+
+      - name: Package Linux ${{ matrix.arch }} (AppImage + deb + tar.gz)
+        run: pnpm --dir apps/desktop run package:linux:${{ matrix.arch }}
+
+      # Build the channel manifests here as well: a wrong version or a missing AppImage then
+      # fails while the runner still holds the build, instead of during publish.
+      - name: Stage the self-hosted update feed
+        run: pnpm --dir apps/desktop run stage:selfhost:linux:${{ matrix.arch }}
+
+      # One artifact per architecture holding exactly what a release needs: the raw
+      # electron-builder output, minus the multi-hundred-megabyte linux-unpacked debug tree,
+      # and the staged feed beside it. always() keeps the artifact even if staging failed,
+      # so a manifest problem never discards a twenty-minute build.
+      - name: Upload packaged artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-harness-linux-${{ matrix.arch }}
+          path: |
+            apps/desktop/.desktop-build/targets/linux-${{ matrix.arch }}/artifacts/*.AppImage
+            apps/desktop/.desktop-build/targets/linux-${{ matrix.arch }}/artifacts/*.AppImage.blockmap
+            apps/desktop/.desktop-build/targets/linux-${{ matrix.arch }}/artifacts/*.deb
+            apps/desktop/.desktop-build/targets/linux-${{ matrix.arch }}/artifacts/*.tar.gz
+            apps/desktop/.desktop-build/targets/linux-${{ matrix.arch }}/artifacts/*.yml
+            apps/desktop/.desktop-build/targets/linux-${{ matrix.arch }}/artifacts/*-release.json
+          if-no-files-found: error
+          retention-days: 14
+
+      # The gate between "a file was produced" and "a file may be published". Packaging
+      # validates its configuration and writes well-formed AppImages, and neither of those
+      # says anything about whether the application runs: rc.2 passed both and then opened
+      # the fatal startup dialog on every machine that installed it. Launching the build
+      # here turns that class of mistake into a red job, and publish (which needs: package)
+      # never gets to upload a package nobody can open.
+      - name: Smoke-test the packaged ${{ matrix.arch }} AppImage
+        uses: ./.github/actions/smoke-linux-appimage
+        with:
+          directory: apps/desktop/.desktop-build/targets/linux-${{ matrix.arch }}/artifacts
+          arch: ${{ matrix.arch }}
+
+  publish:
+    name: Publish Linux feeds to the self-hosted server
+    runs-on: ubuntu-24.04
+    needs: package
+    # Nothing publishes by itself: no push, pull request, or scheduled run reaches an upload
+    # endpoint. An operator starts this job by hand after a packaging run was verified.
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_selfhost == true && vars.DSH_SELFHOST_PUBLISH == 'true'
+    # A gigabyte-scale push to a distant server is slow, and the receiving host throttles
+    # inbound traffic, so a full publish is measured in hours rather than minutes. The
+    # hard ceiling keeps a stalled transfer from silently occupying the runner until the
+    # six-hour job limit. Pieces that already arrived stay in the staging area outside the
+    # document root, so a run that hits this ceiling resumes on the next attempt instead
+    # of resending a gigabyte from zero.
+    timeout-minutes: 350
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          clean: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deepseek-harness-linux-*
+          path: apps/desktop/.desktop-build/targets
+          merge-multiple: false
+
+      # upload-artifact drops the directory prefix whenever only one of the two upload globs
+      # matched, so the extracted tree is either linux-<arch>/... or linux-<arch>/artifacts/....
+      # Flatten both spellings into the layout upload-selfhosted.mjs reads.
+      - name: Place artifacts where the publisher expects them
+        run: |
+          set -euo pipefail
+          cd apps/desktop/.desktop-build/targets
+          for arch in x64 arm64; do
+            source="deepseek-harness-linux-$arch"
+            if [ ! -d "$source" ]; then
+              echo "::error::missing downloaded artifact $source"
+              exit 1
+            fi
+            mkdir -p "linux-$arch/artifacts"
+            cp -a "$source/." "linux-$arch/artifacts/"
+            nested="linux-$arch/artifacts/artifacts"
+            if [ -d "$nested" ]; then
+              cp -a "$nested/." "linux-$arch/artifacts/"
+              rm -rf "$nested"
+            fi
+            rm -rf "$source"
+          done
+          ls -la linux-x64/artifacts linux-arm64/artifacts
+
+      # Password-authenticated publishing runs ssh through sshpass.
+      - name: Install publishing transport
+        run: sudo apt-get update && sudo apt-get install -y rsync sshpass
+
+      - uses: ./.github/actions/prepare-linux-env
+        with:
+          origin: ${{ env.SELFHOST_ORIGIN }}
+          prefix: ${{ env.SELFHOST_PREFIX }}
+
+      - name: Publish both Linux feeds
+        env:
+          DSH_SELFHOST_SSH_TARGET: ${{ secrets.DSH_SELFHOST_SSH_TARGET }}
+          DSH_SELFHOST_SSH_PORT: ${{ secrets.DSH_SELFHOST_SSH_PORT }}
+          DSH_SELFHOST_SSH_KEY: ${{ secrets.DSH_SELFHOST_SSH_KEY }}
+          DSH_SELFHOST_SSH_PASSWORD: ${{ secrets.DSH_SELFHOST_SSH_PASSWORD }}
+          DSH_SELFHOST_REMOTE_ROOT: ${{ secrets.DSH_SELFHOST_REMOTE_ROOT }}
+          # Concurrent scp streams. The receiving host throttles inbound traffic, and a reset
+          # stream loses whatever it had already pushed, so fewer streams is not automatically
+          # slower. Leave the variable unset for the built-in default of 5; set it to retune a
+          # slow or failure-prone publish without editing the script or re-releasing anything.
+          DSH_SELFHOST_PARALLEL_STREAMS: ${{ vars.DSH_SELFHOST_PARALLEL_STREAMS }}
+        run: |
+          pnpm --dir apps/desktop run upload:selfhost:linux:x64
+          pnpm --dir apps/desktop run upload:selfhost:linux:arm64
+
+  # A second distribution channel, not a second update channel. The client's baked-in
+  # app-update.yml points at the self-hosted origin, so a GitHub release never competes with
+  # it - it only gives the packages a home that survives the server. Running after publish
+  # keeps the two in step: if the feed did not go out, neither does the release.
+  release:
+    name: Attach the Linux packages to a GitHub release
+    runs-on: ubuntu-24.04
+    needs: package
+    if: github.event_name == 'workflow_dispatch' && inputs.attach_release == true
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          clean: true
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deepseek-harness-linux-*
+          path: apps/desktop/.desktop-build/targets
+          merge-multiple: false
+
+      # Same flattening the publish step performs: upload-artifact drops the directory prefix
+      # whenever only one of the two upload globs matched.
+      - name: Read the packaged version and collect the release assets
+        id: version
+        run: |
+          set -euo pipefail
+          cd apps/desktop/.desktop-build/targets
+          for arch in x64 arm64; do
+            source="deepseek-harness-linux-$arch"
+            if [ ! -d "$source" ]; then
+              echo "::error::missing downloaded artifact $source"
+              exit 1
+            fi
+            mkdir -p "linux-$arch/artifacts"
+            cp -a "$source/." "linux-$arch/artifacts/"
+            nested="linux-$arch/artifacts/artifacts"
+            if [ -d "$nested" ]; then
+              cp -a "$nested/." "linux-$arch/artifacts/"
+              rm -rf "$nested"
+            fi
+            rm -rf "$source"
+          done
+          version=$(python3 -c "import glob, json; print(json.load(open(sorted(glob.glob('linux-x64/artifacts/*release.json'))[0]))['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # softprops/action-gh-release matches `files:` relative to the workspace root, not to
+          # whatever directory this step cd'd into, so the staging directory has to be created
+          # there - building it under targets/ made the glob match nothing and failed the job
+          # after every package had already been published.
+          assets="$GITHUB_WORKSPACE/release-assets"
+          mkdir -p "$assets"
+          for arch in x64 arm64; do
+            for pattern in '*.AppImage' '*.deb' '*.tar.gz'; do
+              find "linux-$arch/artifacts" -maxdepth 1 -name "$pattern" -exec cp -a {} "$assets/" \;
+            done
+          done
+          # A checksum file lets someone verify a mirror against this release without trusting
+          # either the mirror or GitHub.
+          ( cd "$assets" && sha256sum -- * > SHA256SUMS.txt )
+          ls -l "$assets"
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}（Linux）
+          # This fork publishes its RC builds as the stable Latest release (v0.2.0-rc.3
+          # already ships as stable). A hardcoded true here demoted a manually promoted
+          # release back to prerelease on every Linux build, so keep it false.
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: release-assets/*
+          body: |
+            DeepSeek Harness 桌面版 Linux 安装包，x64 与 arm64 各三种格式。
+
+            **自动更新**：客户端内置的更新源为 `https://sswwgzs.cn/dsh/`，安装后会自动从该地址检查更新，与本页面无关。本 Release 只是额外的分发与备份渠道。
+
+            **安装方式**
+            - AppImage：`chmod +x *.AppImage && ./<文件名>`
+            - deb：`sudo apt install ./<文件名>`
+            - tar.gz：解压后运行其中的 `deepseek-harness`
+
+            **架构选择**：x64 用于常规 PC / 服务器；arm64 用于飞腾、鲲鹏、ARM 虚拟机等机型。
+
+            附 `SHA256SUMS.txt` 用于校验镜像完整性。

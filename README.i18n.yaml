@@ -1,0 +1,49 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write README.md
+/deepseek-harness-linux-desktop:
+  en: 1664586c48672aee
+  zh: f510eb14298bde58
+/deepseek-harness-linux-desktop/what-this-is-and-what-it-is-not:
+  en: db211d40f540a1f2
+  zh: 6702e1c4b11c14b9
+/deepseek-harness-linux-desktop/highlights:
+  en: e3e2955dc436c603
+  zh: c2e9e04111856974
+/deepseek-harness-linux-desktop/artifacts:
+  en: f736b6082e863e12
+  zh: eb846d634d26717d
+/deepseek-harness-linux-desktop/quick-start:
+  en: 9535b10be9abb7a8
+  zh: 37665fe48339b410
+/deepseek-harness-linux-desktop/quick-start/option-1-appimage-recommended-supports-auto-update:
+  en: 6f62715c0ce1b616
+  zh: d455f2a0d7b4785e
+/deepseek-harness-linux-desktop/quick-start/option-2-deb:
+  en: 68cad847accb3b21
+  zh: 28af93bbd460fbdf
+/deepseek-harness-linux-desktop/quick-start/option-3-tar-gz-portable:
+  en: a4dcd116a80ebe27
+  zh: a324c3dc3ca49a2c
+/deepseek-harness-linux-desktop/building-from-source:
+  en: 9254a615b2652ddd
+  zh: 7cdc0370123331a1
+/deepseek-harness-linux-desktop/auto-update:
+  en: b8f81fc949e54566
+  zh: 30d9f382e823a00e
+/deepseek-harness-linux-desktop/known-limitations:
+  en: ec9a7afc24dd71e8
+  zh: dabe99d9b5bdcee7
+/deepseek-harness-linux-desktop/relationship-to-upstream:
+  en: bb428ae7a4ca6293
+  zh: 3bc00a5f6b6f1e7f
+/deepseek-harness-linux-desktop/security:
+  en: 4befd28f30dfb0d9
+  zh: 1b8f88ff0af5cef0
+/deepseek-harness-linux-desktop/looking-for-this:
+  en: 39cac6811f772638
+  zh: 2b93cd5d0d6cd0f9
+/deepseek-harness-linux-desktop/licence:
+  en: 7c7e18013e96f26e
+  zh: 4896a7e01f9d3f88

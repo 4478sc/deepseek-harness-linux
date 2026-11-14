@@ -1,0 +1,141 @@
+/** Environment variable that selects the Desktop update deployment. */
+export const DESKTOP_AUTO_UPDATE_ENV: 'DSH_DESKTOP_AUTO_UPDATE_ENV'
+
+/** Supported Desktop update deployment. */
+export type DesktopAutoUpdateEnvironment = 'test' | 'production' | 'selfhosted'
+
+/** Update channel embedded in the installer. */
+export type DesktopAutoUpdateChannel = 'nightly' | 'stable'
+
+/** Directory name of one officially supported Desktop release target. */
+export type DesktopAutoUpdateTarget = 'mac-arm64' | 'mac-x64' | 'win-x64'
+
+/** Directory name of a Linux release target, published by this fork's self-hosted deployment. */
+export type DesktopLinuxUpdateTarget = 'linux-x64' | 'linux-arm64'
+
+/** Every Desktop release target this fork can package, Linux included. */
+export type DesktopUpdateTarget = DesktopAutoUpdateTarget | DesktopLinuxUpdateTarget
+
+/**
+ * Name the fixed installer object shared by uploading and cache refresh.
+ * @param target Supported Desktop target.
+ * @returns Fixed download filename.
+ */
+export function desktopLatestInstallerFilename(target: DesktopUpdateTarget): string
+
+/**
+ * Resolve the production website installer URL shared by approval, upload and purge.
+ * @param target Supported Desktop target.
+ * @returns Fixed production download URL.
+ */
+export function desktopWebsiteInstallerUrl(target: DesktopUpdateTarget): string
+
+/** Public updater URL and object prefixes for one release target. */
+export interface DesktopAutoUpdateConfig {
+  readonly environment: DesktopAutoUpdateEnvironment
+  readonly channel: DesktopAutoUpdateChannel
+  readonly target: DesktopUpdateTarget
+  readonly origin: string
+  readonly publicUrl: string
+  readonly keyPrefix: string
+  readonly binaryKeyPrefix: string
+}
+
+/** Public updater URL and private COS destination for one upload target. */
+export interface DesktopUploadConfig extends DesktopAutoUpdateConfig {
+  readonly bucket: string
+  readonly secretIdEnvName: string
+  readonly secretKeyEnvName: string
+}
+
+/**
+ * Resolve the channel embedded in the installer; omitted local settings retain nightly.
+ * @param env - Packaging or upload settings.
+ * @returns Validated channel.
+ */
+export function resolveDesktopUpdateChannel(env: NodeJS.ProcessEnv): DesktopAutoUpdateChannel
+
+/**
+ * Resolve the update deployment, defaulting local release work to test.
+ * @param env - Packaging or upload environment.
+ * @returns Validated deployment name.
+ */
+export function resolveDesktopAutoUpdateEnvironment(
+  env: NodeJS.ProcessEnv,
+): DesktopAutoUpdateEnvironment
+
+/**
+ * Resolve one supported platform and architecture to its update directory.
+ * @param platform - Target Node.js platform.
+ * @param arch - Target Node.js architecture.
+ * @returns Update target directory.
+ */
+export function resolveDesktopAutoUpdateTarget(
+  platform: NodeJS.Platform,
+  arch: string,
+): DesktopUpdateTarget
+
+/**
+ * Return the local completion record filename for one packaged target.
+ * @param target - Supported release target.
+ * @returns Filename stored beside electron-builder artifacts.
+ */
+export function desktopBuildRecordFilename(target: DesktopUpdateTarget): string
+
+/**
+ * Return the electron-builder channel metadata filename for an application version.
+ * @param version - Desktop semantic version.
+ * @param platform - Target platform.
+ * @param channel - Selected channel; omitted means nightly.
+ * @param arch - Target architecture; Linux manifests are suffixed unless it is x64.
+ * @returns Channel metadata filename emitted for the target.
+ */
+export function desktopUpdateMetadataFilename(
+  version: string,
+  platform: NodeJS.Platform,
+  channel?: DesktopAutoUpdateChannel,
+  arch?: string,
+): string
+
+/**
+ * Resolve the public updater URL and object prefixes for one release target.
+ * @param env - Packaging or upload environment.
+ * @param platform - Target Node.js platform.
+ * @param arch - Target Node.js architecture.
+ * @returns Resolved updater configuration.
+ * @throws When the test deployment lacks a valid HTTPS origin or a 32-character lowercase hexadecimal release ID.
+ */
+export function resolveDesktopAutoUpdateConfig(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  arch: string,
+): DesktopAutoUpdateConfig
+
+/**
+ * Resolve the public updater URL and private COS destination for one upload target.
+ * @param env - Upload environment.
+ * @param platform - Target Node.js platform.
+ * @param arch - Target Node.js architecture.
+ * @returns Resolved upload configuration.
+ * @throws When the selected deployment lacks a bucket or valid updater configuration.
+ */
+export function resolveDesktopUploadConfig(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  arch: string,
+): DesktopUploadConfig
+
+/**
+ * Resolve the packaged update channel, defaulting omitted local settings to nightly.
+ * @param env Packaging settings.
+ * @returns Validated channel.
+ */
+export function resolveDesktopUpdateChannel(env: NodeJS.ProcessEnv): 'nightly' | 'stable'
+
+/**
+ * Read a required nonempty deployment setting.
+ * @param env Packaging or upload settings.
+ * @param name Setting name included in missing-value diagnostics.
+ * @returns Trimmed setting value.
+ */
+export function requiredEnvironmentValue(env: NodeJS.ProcessEnv, name: string): string

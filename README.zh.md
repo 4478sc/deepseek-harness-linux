@@ -1,0 +1,133 @@
+# DeepSeek Harness · Linux 桌面版
+
+[English](README.md) | 中文
+
+> 给官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 桌面端补上**社区 Linux 桌面端打包** —— 开源（MIT）DeepSeek 桌面客户端，开箱即用的 AppImage / `.deb` / `.tar.gz`，覆盖 x64 与 arm64 双架构，配套原生 CI 与 AppImage 自动更新。
+
+**一句话定位**：在 Linux 上「能下载、能装、能更新」的 DeepSeek 桌面端（DeepSeek desktop for Linux）。完整保留官方 agent / 插件 / 联网能力，既可本地自托管运行 `dsh web`，也能装上原生桌面客户端，数据始终留在本机。
+
+官方桌面端只发布 macOS 与 Windows；Linux 用户要么退而用 Web 版，要么自己从源码硬编。本项目就是这个缺口的补完：在保留官方桌面全部功能的前提下，把 Linux 作为**社区支持平台**来打包、测试、分发。
+
+## 这是什么 / 不是什么
+
+- ✅ **是**：一个下游 fork，专注做一件事——让 dsh 桌面端在 Linux 上「能下载、能装、能更新」。
+- ❌ **不是**：不是官方 DeepSeek 项目，也不魔改 agent 内核。agent 能力、插件体系、通信协议全部跟随上游。
+
+## 核心特性
+
+- 🐧 **Linux 原生支持**：为 DeepSeek 官方桌面端提供社区 Linux 桌面端打包的下游项目 —— Ubuntu / Debian / 树莓派 5 / ARM 服务器都能跑。
+- 📦 **三种安装包**：AppImage（单文件免安装、支持自动更新）、`.deb`（Debian / Ubuntu 原生包管理）、`.tar.gz`（便携解压即用）。**仅 AppImage 支持应用内自动更新**，deb / tar.gz 需手动下载新版替换。
+- 🔄 **自动更新**：AppImage 通过 `electron-updater` 走 HTTPS 更新通道，按更新描述符（yml）内声明的 **sha512** 校验下载产物。
+- 🧩 **功能完整**：agent 内核、插件体系、联网、前端全部跟随上游，Linux 下与官方体验一致（仅 Office 文档转换暂缺）。
+- 🏠 **可自托管**：本地运行 `dsh web` 或安装桌面端，数据留在本机，适合隐私敏感与内网场景。
+- 🆓 **开源免费**：基于上游 MIT 许可证分发。
+
+## 产物一览
+
+每次构建为每种架构产出三种安装包：
+
+| 格式 | 用途 | 典型文件名 |
+|------|------|-----------|
+| **AppImage** | 单文件免安装，支持自动更新 | `deepseek-harness-<版本>-linux-x64.AppImage` |
+| **.deb** | Debian / Ubuntu 系原生包管理 | `deepseek-harness-<版本>-linux-amd64.deb` |
+| **.tar.gz** | 便携解压即用 | `deepseek-harness-<版本>-linux-x64.tar.gz` |
+
+> 文件名中的 `<版本>` 替换为实际发布版本（当前为 `0.2.2-rc.3`）。
+
+支持架构：`x64`（AMD / Intel）、`arm64`（树莓派 5、Apple Silicon 上的 Linux、ARM 服务器等）。
+
+<a id="quick-start"></a>
+
+## 快速开始
+
+### 方式一：AppImage（推荐，支持自动更新）
+
+1. 到 [Releases](https://github.com/4478sc/deepseek-harness-linux/releases) 下载对应架构的 `.AppImage`。
+2. 安装运行时依赖（AppImage 需要 FUSE 2）：
+   ```sh
+   sudo apt install libfuse2          # Debian / Ubuntu; libfuse2t64 on 24.04 and later
+   # Fedora / RHEL: sudo dnf install fuse2
+   ```
+3. 赋予执行权限并运行：
+   ```sh
+   chmod +x deepseek-harness-*-linux-x64.AppImage
+   ./deepseek-harness-*-linux-x64.AppImage
+   ```
+
+### 方式二：.deb
+
+```sh
+sudo dpkg -i deepseek-harness-*-linux-x64.deb
+deepseek-harness            # or start it from the application menu
+```
+
+### 方式三：.tar.gz（便携）
+
+```sh
+tar -xzf deepseek-harness-*-linux-x64.tar.gz
+cd deepseek-harness-*-linux-x64
+./deepseek-harness          # the launcher inside the unpacked directory
+```
+
+> 在无显示环境（如远程服务器 + VNC）运行时，确保已设置 `DISPLAY`（例如 xfce4 + TigerVNC 下的 `:1`），桌面会自动拉起。
+
+<a id="building-from-source"></a>
+
+## 从源码构建（开发者）
+
+需要 Node.js ≥ 24.9、pnpm 11.28.5（`packageManager` 固定），以及构建主机上的 `libfuse2`（AppImage 组装所需；Ubuntu 24.04+ / Debian 13 是 `libfuse2t64`）。
+
+```sh
+git clone https://github.com/4478sc/deepseek-harness-linux.git
+cd deepseek-harness-linux
+pnpm install
+cp apps/desktop/.env.linux.example apps/desktop/.env.linux   # fill in release settings as needed
+pnpm --dir apps/desktop run package:linux:x64                # x64
+pnpm --dir apps/desktop run package:linux:arm64              # arm64
+```
+
+自托管 Web 模式（`dsh web`）依赖各 workspace 包已构建出的 `lib/` 产物：全新 checkout 直接启动会让 typert-loader 找不到 `lib/typert.host.js` 而报一堆 `ERR_MODULE_NOT_FOUND`，需先执行 `pnpm run build:official`。
+
+`Desktop (Linux)` 工作流会在原生 runner 上按需构建两种架构（`ubuntu-24.04` / `ubuntu-24.04-arm`），产物可在 Actions Artifacts 或自动发布的 Release 中获取。
+
+## 自动更新
+
+AppImage 通过 `electron-updater` 走 AppImage 更新通道，更新描述符为 `nightly-linux.yml`，全程 HTTPS。未签名构建下，更新**仅依赖 HTTPS 传输与 feed 元数据校验**，无代码签名验签——请勿用于高信任场景。
+
+自动更新由 `electron-updater` 校验描述符内声明的 **sha512**；手动下载时请核对 Release 附带的 `SHA256SUMS.txt`。
+
+## 已知限制
+
+1. **未签名**：Linux 构建不带代码签名。这是社区构建，分发时请在 Release 中核对校验和。
+2. **Office 文档转换暂缺**：桌面内嵌的 DOCX / XLSX / PPTX → PDF 转换依赖 LibreOffice Kit 的 Linux 原生绑定，本版本尚未将其随包分发，该功能在 Linux 下暂不可用。其余桌面功能（agent、skill、联网、前端）均正常。
+3. **上游处于 developer preview**：官方迭代快、破坏性变更频繁，本项目会持续 rebase 上游提交。
+4. **无公证 / 无商店上架**：不走任何系统级公证或应用商店流程。
+
+## 与上游的关系
+
+- 上游：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（MIT，DeepSeek-AI）。
+- 本仓库是其下游 fork：主动改动限于 Linux 移植层——CI 工作流、electron-builder 配置、类型声明补全、POSIX launcher 兼容、桌面端打包说明与冒烟测试脚本。
+- **移植层之外的差异来自版本滞后，尚未逐项追平上游**：本仓库按 rc 节奏 rebase 上游，落后期间会缺失部分上游新增文件。当前基线 commit 与版本对应关系见各次 Release notes，不要假定内核与官方逐提交同步。
+- 后续希望将 Linux 打包经验整理后反馈给上游，供官方参考。
+
+## 安全须知
+
+- 运行前请阅读上游 [SAFETY.md](https://github.com/deepseek-ai/deepseek-harness/blob/master/SAFETY.md)。
+- 未签名二进制存在供应链风险：只从本仓库 Release 下载，并核对 SHA256 校验和。
+- 自动更新通道未做代码签名验签，仅依赖 HTTPS + feed 元数据。
+
+## 找对地方了？
+
+如果你正在搜下面这些词，那本项目就是你要找的：
+
+- **DeepSeek Linux** / **DeepSeek on Linux** / **DeepSeek 桌面端 Linux**
+- **DeepSeek 客户端下载** / **DeepSeek 桌面客户端** / **DeepSeek desktop for Linux**
+- **DeepSeek AppImage** / **DeepSeek .deb** / **Ubuntu DeepSeek** / **Debian 安装 DeepSeek**
+- **树莓派 DeepSeek** / **ARM64 DeepSeek** / **DeepSeek Linux 安装包**
+- **开源 DeepSeek 客户端** / **self-hosted DeepSeek** / **Linux AI 助手**
+
+> 说明：本项目是**桌面客户端**，模型能力由 DeepSeek 官方 API 提供，**不内置离线模型**，也不等同于"在本地跑模型"。如需接入自托管或第三方模型，请在客户端内自行配置对应的 API 端点与密钥。
+
+## 许可证
+
+本项目基于上游 **MIT** 许可证分发。DeepSeek Harness 由 DeepSeek-AI 开发，版权归其所有；Linux 打包层在同一 MIT 许可下新增。详见 [LICENSE](LICENSE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

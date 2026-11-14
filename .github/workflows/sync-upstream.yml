@@ -1,0 +1,243 @@
+# Keep this fork aligned with the official DeepSeek Harness repository.
+#
+# Upstream ships macOS and Windows desktop builds only; this repository adds first-class
+# Linux packaging on top of it. Upstream moves very fast (hundreds of commits per week),
+# so reconciling by hand is not realistic. This workflow does it on GitHub's own runners,
+# where fetching upstream is cheap and reliable.
+#
+# What one run does:
+#   1. Fetch the official ref and measure how far behind we are.
+#   2. Merge it into a fresh sync branch.
+#   3. Resolve only the conflicts this fork owns outright (Linux packaging scripts, Linux
+#      CI, READMEs) by keeping ours. Every other conflict is a shared file: upstream changed
+#      it and so did the Linux work, so no rule can pick a side without dropping one. The run
+#      stops there, leaves the branch untouched, and asks for a human to replay the Linux
+#      patch on the upstream file.
+#   4. Otherwise push that branch and open a pull request summarising what came from where.
+#
+# Nothing is written to master automatically: a human or a follow-up review decides.
+
+name: Sync upstream
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream-ref:
+        description: Upstream branch or tag to sync from.
+        required: false
+        default: master
+      open-pr:
+        description: Open a pull request with the merged result.
+        required: false
+        type: boolean
+        default: true
+  schedule:
+    # 02:17 UTC, daily.
+    - cron: '17 2 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  # Paths this fork owns outright: files upstream either does not have or should never
+  # overwrite. Directories are listed member by member where upstream ships siblings of the
+  # same kind, so adding a shared file here is a deliberate decision rather than a side
+  # effect. Everything else is shared: shared files that conflict stop the run so a human
+  # replays the Linux patch on upstream's version, because keeping ours there would silently
+  # drop upstream's new dependencies, scripts, and channel semantics.
+  OURS_PATHS: |
+    apps/desktop/.env.linux.example
+    apps/desktop/scripts/linux-package-settings.d.mts
+    apps/desktop/scripts/linux-package-settings.mjs
+    apps/desktop/scripts/upload-selfhosted.d.mts
+    apps/desktop/scripts/upload-selfhosted.mjs
+    .github/actions/prepare-linux-env/
+    .github/actions/smoke-linux-appimage/
+    .github/workflows/desktop-linux.yml
+    .github/workflows/release-attach.yml
+    README.md
+    README.zh.md
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out our repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # The default GITHUB_TOKEN is not allowed to touch .github/workflows/, and a sync
+          # nearly always changes upstream workflow files. SYNC_TOKEN is a PAT carrying the
+          # workflow scope; fall back to the built-in token when it is absent.
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      - name: Fetch the official upstream
+        id: upstream
+        run: |
+          set -euo pipefail
+          REF="${{ inputs.upstream-ref || 'master' }}"
+          git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git 2>/dev/null || true
+          git fetch upstream "${REF}:refs/remotes/upstream-sync" --no-tags --force
+          SHA="$(git rev-parse refs/remotes/upstream-sync)"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "Fetched upstream ${REF} at ${SHA}"
+
+      - name: Measure the gap
+        id: gap
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.upstream.outputs.sha }}"
+          BASE="$(git merge-base HEAD "${SHA}")"
+          BEHIND="$(git rev-list --count "${BASE}..${SHA}")"
+          AHEAD="$(git rev-list --count "${SHA}..HEAD")"
+          echo "behind=${BEHIND}" >> "$GITHUB_OUTPUT"
+          echo "ahead=${AHEAD}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Sync summary"
+            echo ""
+            echo "- upstream ref: \`${{ steps.upstream.outputs.ref }}\` (\`${SHA:0:12}\`)"
+            echo "- merge base: \`${BASE:0:12}\`"
+            echo "- commits behind upstream: **${BEHIND}**"
+            echo "- our commits on top: **${AHEAD}**"
+          } > summary.md
+
+      # When behind == 0 the steps below are all skipped by their own guards; this
+      # step only prints the friendly message. (exit 0 alone would not stop them.)
+      - name: Stop when already current
+        if: steps.gap.outputs.behind == '0'
+        run: |
+          echo "Already up to date with upstream; nothing to do."
+
+      - name: Merge upstream and resolve conflicts
+        if: steps.gap.outputs.behind != '0'
+        id: merge
+        run: |
+          set -uo pipefail
+          SHA="${{ steps.upstream.outputs.sha }}"
+          # Fixed name on purpose. A timestamped branch made every run open a new PR,
+          # because the dedup below looks the PR up by branch name and never found one.
+          # Reuse a single branch and force-push the fresh merge instead.
+          BRANCH="sync/upstream"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${BRANCH}"
+
+          git merge --no-edit "${SHA}" >/dev/null 2>&1 || echo "merge reported conflicts"
+
+          UNMERGED="$(git diff --name-only --diff-filter=U || true)"
+
+          if [ -z "${UNMERGED}" ]; then
+            echo "outcome=clean" >> "$GITHUB_OUTPUT"
+            echo "### Conflict resolution" > resolved.md
+            echo "" >> resolved.md
+            echo "Merged cleanly — no conflicts." >> resolved.md
+          else
+            echo "outcome=conflicts" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Conflict resolution"
+              echo ""
+              echo "| file | resolution |"
+              echo "| --- | --- |"
+            } > resolved.md
+
+            shared=""
+            while IFS= read -r f; do
+              [ -z "${f}" ] && continue
+              keep=shared
+              while IFS= read -r p; do
+                [ -z "${p}" ] && continue
+                case "${f}" in
+                  "${p}"*) keep=ours; break;;
+                esac
+              done <<< "${OURS_PATHS}"
+
+              if [ "${keep}" = "ours" ]; then
+                git checkout --ours -- "${f}" 2>/dev/null || true
+                git add -- "${f}" 2>/dev/null || true
+                echo "| \`${f}\` | ours (fork-owned) |" >> resolved.md
+              else
+                shared="${shared}${f}"$'\n'
+                echo "| \`${f}\` | shared: needs a hand merge |" >> resolved.md
+              fi
+            done <<< "${UNMERGED}"
+
+            if [ -n "${shared}" ]; then
+              # A shared file carries both an upstream change and the Linux work, so no rule
+              # picks a side without dropping one. Leave the branch untouched and stop.
+              git merge --abort 2>/dev/null || true
+              {
+                echo ""
+                echo "### Manual review required"
+                echo ""
+                echo "These files changed upstream and in the Linux work at the same time:"
+                echo ""
+                printf "%b" "${shared}" | while IFS= read -r f; do
+                  [ -n "${f}" ] && echo "- \`${f}\`"
+                done
+                echo ""
+                echo "Merge upstream by hand: take upstream's file, then replay the Linux change"
+                echo "on it. Keeping ours would discard upstream's new dependencies, scripts, and"
+                echo "channel semantics; taking theirs would discard the Linux support."
+              } >> resolved.md
+              cat resolved.md
+              echo "::error::Shared files conflict with upstream; a human must replay the Linux patch."
+              exit 1
+            fi
+
+            if git diff --cached --quiet 2>/dev/null; then
+              git commit --no-edit -m "Merge upstream ${SHA:0:12}" >/dev/null 2>&1 || true
+            else
+              git commit --no-edit >/dev/null 2>&1 || git commit -m "Merge upstream ${SHA:0:12}" >/dev/null 2>&1 || true
+            fi
+          fi
+
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          {
+            cat summary.md
+            echo ""
+            cat resolved.md
+            echo ""
+            echo "> \`ours\` rows are files upstream does not own."
+            echo ">"
+            echo "> Shared files never resolve automatically: when one conflicts, the run stops"
+            echo "> before pushing and asks a human to take upstream's file and replay the Linux"
+            echo "> change on it."
+          } > pr-body.md
+          cat pr-body.md
+
+      - name: Push the sync branch
+        if: steps.gap.outputs.behind != '0'
+        run: |
+          set -euo pipefail
+          # The branch is reused across runs, so this push is never a fast-forward.
+          git push --force origin "${{ steps.merge.outputs.branch }}"
+
+      - name: Open a pull request
+        if: steps.gap.outputs.behind != '0' && inputs.open-pr != false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Close PRs left behind by the old timestamped branch naming. With the fixed branch
+          # name above, only one sync PR can be open from now on.
+          LEGACY="$(gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("sync/upstream-")) | .number' || true)"
+          for n in ${LEGACY}; do
+            gh pr close "${n}" --comment "Superseded by the fixed \`sync/upstream\` branch." || true
+          done
+          EXISTING="$(gh pr list --head "${{ steps.merge.outputs.branch }}" --json number --jq '.[0].number' || true)"
+          if [ -n "${EXISTING}" ]; then
+            echo "Pull request #${EXISTING} already exists for this branch."
+            exit 0
+          fi
+          gh pr create \
+            --base master \
+            --head "${{ steps.merge.outputs.branch }}" \
+            --title "chore: sync with upstream deepseek-ai/deepseek-harness (${{ steps.gap.outputs.behind }} commits)" \
+            --body-file pr-body.md
