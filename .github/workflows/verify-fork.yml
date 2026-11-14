@@ -1,0 +1,83 @@
+# Fork-only verification lane.
+#
+# Upstream's CI routes its Linux enterprise jobs (static, lint, coverage, snapshots)
+# to the custom runner label `dsh-ubuntu-24-04-16core`, or to a Blacksmith or
+# self-hosted failover pool selected by DSH_CI_FAILOVER_LINUX. This fork registers
+# none of those, so those jobs stay queued forever here while the jobs on the
+# free GitHub-hosted image (benchmarks, the Node compatibility matrix) run.
+#
+# This workflow runs the same commands on ubuntu-24.04, the free GitHub-hosted
+# image, so a fork can close the type-check and lint gates without a paid or
+# self-hosted runner. It reads the repository only: no secrets, no publish, no
+# deploy, no external service.
+name: Fork verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-and-lint:
+    name: typecheck and lint (hosted)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The archive gate reads the trusted PR base commit.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # package.json requires Node >= 24.9.0.
+          node-version: '24.9'
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      # Same step as the upstream lint job: oxlint's type-aware rules read the
+      # compiled package declarations.
+      - name: Compile package declarations
+        run: pnpm run typecheck
+
+      - name: Run lint and duplication
+        run: pnpm run check:ci:lint:contracts-ready
+
+  benchmark-reproduction:
+    name: benchmark lane (hosted, dispatch only)
+    # A failing benchmark needs one reproduction on an idle hosted runner; keep it
+    # out of the pull-request lane so it never competes with the gates above.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.9'
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install benchmark browser and hosted dependencies
+        run: pnpm --filter @deepseek-ai/dsh-benchmarks exec playwright install --with-deps chromium
+
+      - name: Run performance benchmarks
+        env:
+          DSH_GATE_VERBOSE: '1'
+        run: pnpm run check:ci:bench
