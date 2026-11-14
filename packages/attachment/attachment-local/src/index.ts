@@ -257,9 +257,6 @@ export class LocalAttachmentStore extends AttachmentStore {
   private async prepareImage(input: SaveImageAttachment): Promise<PreparedImageFile> {
     if (this.imageWorker === undefined) return prepareImageFile(input, this.imageLimits, this.normalizationPolicy)
     this.validateImageBatch([input])
-    if (input.data.byteLength > this.imageLimits.maxImageBytes) {
-      throw new AttachmentError('Image exceeds the configured encoded-byte limit.', 'IMAGE_TOO_LARGE')
-    }
     return workerImage(await this.imageWorker.run({ operation: 'prepare',
       input: { ...input,
         data: Buffer.from(input.data).toString('base64') },
