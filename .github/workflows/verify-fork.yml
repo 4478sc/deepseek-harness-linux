@@ -150,15 +150,18 @@ jobs:
           pnpm run build:bench
           pnpm run build:web
 
+      # Mirror run-bench-suite.ts phase "last": the browser case runs alone with the
+      # report phase set, which is how CI actually executes this file.
       - name: Run the exact failing benchmark file
         id: bench
         working-directory: ${{ steps.tree.outputs.dir }}
         continue-on-error: true
         env:
           DSH_GATE_VERBOSE: '1'
+          DSH_BENCH_REPORT_PHASE: last
         run: |
           set -uo pipefail
-          pnpm exec vitest bench --config vitest.bench.config.ts --run benchmarks/long-session-browser/long-session.bench.ts
+          pnpm exec vitest run --config vitest.bench.config.ts --no-file-parallelism --maxWorkers=1 benchmarks/long-session-browser/long-session.bench.ts
           echo "bench_exit=$?"
 
       - name: Summary
