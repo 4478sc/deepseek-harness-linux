@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   desktopBuildRecordFilename,
+  desktopWebsiteInstallerUrl,
   desktopUpdateMetadataFilename,
   resolveDesktopAutoUpdateConfig,
   resolveDesktopAutoUpdateEnvironment,
@@ -124,10 +125,28 @@ describe('desktop auto-update environment', () => {
   it('suffixes Linux metadata with a non-x64 architecture, matching electron-builder', () => {
     expect(desktopUpdateMetadataFilename('1.2.3', 'linux', 'nightly', 'x64')).toBe('nightly-linux.yml')
     expect(desktopUpdateMetadataFilename('1.2.3', 'linux', 'nightly', 'arm64')).toBe('nightly-linux-arm64.yml')
-    expect(desktopUpdateMetadataFilename('1.2.3', 'linux', 'latest', 'x64')).toBe('latest-linux.yml')
-    expect(desktopUpdateMetadataFilename('1.2.3', 'linux', 'latest', 'arm64')).toBe('latest-linux-arm64.yml')
+    expect(desktopUpdateMetadataFilename('1.2.3', 'linux', 'stable', 'x64')).toBe('stable-linux.yml')
+    expect(desktopUpdateMetadataFilename('1.2.3', 'linux', 'stable', 'arm64')).toBe('stable-linux-arm64.yml')
     // Only Linux manifests carry the architecture; the other platforms share one file.
-    expect(desktopUpdateMetadataFilename('1.2.3', 'darwin', 'latest', 'arm64')).toBe('latest-mac.yml')
-    expect(desktopUpdateMetadataFilename('1.2.3', 'win32', 'latest', 'x64')).toBe('latest.yml')
+    expect(desktopUpdateMetadataFilename('1.2.3', 'darwin', 'stable', 'arm64')).toBe('stable-mac.yml')
+    expect(desktopUpdateMetadataFilename('1.2.3', 'win32', 'stable', 'x64')).toBe('stable.yml')
   })
+})
+
+it.each([
+  ['mac-arm64', 'dsh-latest-macos-arm64.dmg'],
+  ['mac-x64', 'dsh-latest-macos-x64.dmg'],
+  ['win-x64', 'dsh-latest-windows-x64.exe'],
+] as const)('uses the production origin for website target %s', (target, filename) => {
+  expect(desktopWebsiteInstallerUrl(target)).toBe(`https://download.deepseek.com/desktop/${filename}`)
+})
+
+it.each([['darwin', 'arm64', 'mac-arm64', 'stable-mac.yml'], ['darwin', 'x64', 'mac-x64', 'stable-mac.yml'], ['win32', 'x64', 'win-x64', 'stable.yml']] as const)
+('routes stable metadata and binaries separately for %s %s', (platform, arch, target, filename) => {
+  const config = resolveDesktopAutoUpdateConfig({ DSH_DESKTOP_AUTO_UPDATE_ENV: 'production', DSH_DESKTOP_UPDATE_CHANNEL: 'stable' }, platform, arch)
+  expect(config.channel).toBe('stable')
+  expect(config.keyPrefix).toBe(`dsh-desk/feeds/${target}`)
+  expect(config.binaryKeyPrefix).toBe(`dsh-desk/bin/${target}/stable`)
+  expect(desktopUpdateMetadataFilename('1.0.0', platform, config.channel)).toBe(filename)
+  expect(() => resolveDesktopAutoUpdateConfig({ DSH_DESKTOP_UPDATE_CHANNEL: 'latest' }, platform, arch)).toThrow(/channel/u)
 })

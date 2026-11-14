@@ -2,6 +2,7 @@
 
 import { join } from 'node:path'
 import { ImageWorkerClient } from './image-worker-client.ts'
+import type { ImageWorkerConfig } from './image-worker-client.ts'
 import { workerImage, workerProjection } from './image-worker-protocol.ts'
 import type { PreparedImageFile } from './store.ts'
 import { Context } from '@deepseek-ai/cordis'
@@ -34,15 +35,19 @@ export type { PreparedImageFile } from './store.ts'
 export { readRequestImageFile, requestImageVariantId } from './request-image.ts'
 
 /** Default maximum encoded bytes for one submitted image; oversized sources are refused, not shrunk. */
-export const DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+export const DEFAULT_MAX_IMAGE_BYTES = 50 * 1024 * 1024
 /** Default maximum images in one prompt. */
 export const DEFAULT_MAX_IMAGES_PER_MESSAGE = 20
 /** Default maximum aggregate image bytes in one prompt. */
 export const DEFAULT_MAX_MESSAGE_IMAGE_BYTES = 200 * 1024 * 1024
 /** Default maximum intrinsic pixels for one submitted image. */
 export const DEFAULT_MAX_IMAGE_PIXELS = 64_000_000
-/** Default per-side pixel cap for one submitted image. */
-export const DEFAULT_MAX_IMAGE_DIMENSION = 8192
+/**
+ * Default per-side pixel cap for one submitted image: the largest side a JPEG
+ * can carry. Normalization downscales a long side, so by default the
+ * decoded-pixel limit alone bounds admission.
+ */
+export const DEFAULT_MAX_IMAGE_DIMENSION = 65_535
 /**
  * Default total-pixel budget of the stored normalized image. A larger source
  * is admitted and downscaled proportionally, so admission bounds what rides
@@ -65,13 +70,13 @@ export interface Config {
   /** Optional standalone Node worker for native image decoding; omitted runs in this process. */
   imageWorker?: {
     /** Absolute standalone Node executable; never Electron. */
-    node: string
+    node?: string
     /** Maximum duration of one image operation in milliseconds. */
-    timeoutMs: number
+    timeoutMs?: number
   }
   /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
   dshHome?: string
-  /** Maximum encoded bytes accepted for one submitted image. Default: 20 MiB. */
+  /** Maximum encoded bytes accepted for one submitted image. Default: 50 MiB. */
   maxImageBytes?: number
   /** Maximum image count accepted in one submitted message. Default: 20. */
   maxImagesPerMessage?: number
@@ -79,7 +84,7 @@ export interface Config {
   maxMessageImageBytes?: number
   /** Maximum intrinsic width multiplied by height accepted for one submitted image. Default: 64,000,000. */
   maxImagePixels?: number
-  /** Maximum intrinsic width and maximum intrinsic height accepted for one submitted image. Default: 8192px. */
+  /** Maximum intrinsic width and maximum intrinsic height accepted for one submitted image. Default: 65,535px. */
   maxImageDimension?: number
   /** Total-pixel budget of the stored provider-independent normalized image. */
   normalizedImageMaxPixels?: number
@@ -153,10 +158,28 @@ class SharedRequest<T> {
   }
 }
 
+/**
+ * Read the optional image worker configuration.
+ * @param config - Declared worker fields; omitted or empty leaves decoding in process.
+ * @returns the complete worker configuration, or undefined when none is configured.
+ * @throws If only one of `node` and `timeoutMs` is set.
+ */
+function resolveImageWorker(config: Config['imageWorker']): ImageWorkerConfig | undefined {
+  if (config === undefined) return undefined
+  const { node, timeoutMs } = config
+  if (node === undefined && timeoutMs === undefined) return undefined
+  if (node === undefined || timeoutMs === undefined) {
+    throw new Error('attachment-local: imageWorker requires both node and timeoutMs')
+  }
+  return { node, timeoutMs }
+}
+
 /** Persistent content-addressed local attachment store. */
 export class LocalAttachmentStore extends AttachmentStore {
   static Config: z<Config> = z.object({
-    imageWorker: z.object({ node: z.string().min(1).required(), timeoutMs: z.number().step(1).min(1).required() }),
+    // Both fields are optional here so an omitted worker configuration resolves to `{}`
+    // instead of failing the required-field check; the constructor rejects a half-set pair.
+    imageWorker: z.object({ node: z.string(), timeoutMs: z.number().step(1).min(1) }),
     dshHome: z.string(),
     maxImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_IMAGE_BYTES),
     maxImagesPerMessage: z.number().step(1).min(1).default(DEFAULT_MAX_IMAGES_PER_MESSAGE),
@@ -184,7 +207,8 @@ export class LocalAttachmentStore extends AttachmentStore {
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
-    this.imageWorker = config.imageWorker === undefined ? undefined : new ImageWorkerClient(config.imageWorker)
+    const imageWorkerConfig = resolveImageWorker(config.imageWorker)
+    this.imageWorker = imageWorkerConfig === undefined ? undefined : new ImageWorkerClient(imageWorkerConfig)
     ctx.effect(() => async () => { await this.imageWorker?.dispose() })
     const dshHome = resolveDshHome(config.dshHome)
     this.root = join(dshHome, 'attachments', 'v1')
@@ -233,9 +257,6 @@ export class LocalAttachmentStore extends AttachmentStore {
   private async prepareImage(input: SaveImageAttachment): Promise<PreparedImageFile> {
     if (this.imageWorker === undefined) return prepareImageFile(input, this.imageLimits, this.normalizationPolicy)
     this.validateImageBatch([input])
-    if (input.data.byteLength > this.imageLimits.maxImageBytes) {
-      throw new AttachmentError('Image exceeds the configured encoded-byte limit.', 'IMAGE_TOO_LARGE')
-    }
     return workerImage(await this.imageWorker.run({ operation: 'prepare',
       input: { ...input,
         data: Buffer.from(input.data).toString('base64') },

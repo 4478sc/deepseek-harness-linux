@@ -5,7 +5,7 @@ export const DESKTOP_AUTO_UPDATE_ENV: 'DSH_DESKTOP_AUTO_UPDATE_ENV'
 export type DesktopAutoUpdateEnvironment = 'test' | 'production' | 'selfhosted'
 
 /** Update channel embedded in the installer. */
-export type DesktopAutoUpdateChannel = 'nightly' | 'latest'
+export type DesktopAutoUpdateChannel = 'nightly' | 'stable'
 
 /** Directory name of one officially supported Desktop release target. */
 export type DesktopAutoUpdateTarget = 'mac-arm64' | 'mac-x64' | 'win-x64'
@@ -15,6 +15,20 @@ export type DesktopLinuxUpdateTarget = 'linux-x64' | 'linux-arm64'
 
 /** Every Desktop release target this fork can package, Linux included. */
 export type DesktopUpdateTarget = DesktopAutoUpdateTarget | DesktopLinuxUpdateTarget
+
+/**
+ * Name the fixed installer object shared by uploading and cache refresh.
+ * @param target Supported Desktop target.
+ * @returns Fixed download filename.
+ */
+export function desktopLatestInstallerFilename(target: DesktopUpdateTarget): string
+
+/**
+ * Resolve the production website installer URL shared by approval, upload and purge.
+ * @param target Supported Desktop target.
+ * @returns Fixed production download URL.
+ */
+export function desktopWebsiteInstallerUrl(target: DesktopUpdateTarget): string
 
 /** Public updater URL and object prefixes for one release target. */
 export interface DesktopAutoUpdateConfig {
@@ -110,3 +124,18 @@ export function resolveDesktopUploadConfig(
   platform: NodeJS.Platform,
   arch: string,
 ): DesktopUploadConfig
+
+/**
+ * Resolve the packaged update channel, defaulting omitted local settings to nightly.
+ * @param env Packaging settings.
+ * @returns Validated channel.
+ */
+export function resolveDesktopUpdateChannel(env: NodeJS.ProcessEnv): 'nightly' | 'stable'
+
+/**
+ * Read a required nonempty deployment setting.
+ * @param env Packaging or upload settings.
+ * @param name Setting name included in missing-value diagnostics.
+ * @returns Trimmed setting value.
+ */
+export function requiredEnvironmentValue(env: NodeJS.ProcessEnv, name: string): string

@@ -8,10 +8,12 @@
 # What one run does:
 #   1. Fetch the official ref and measure how far behind we are.
 #   2. Merge it into a fresh sync branch.
-#   3. Resolve the conflicts that are predictable in a packaging fork:
-#        - paths this fork owns (Linux packaging, Linux CI, READMEs) -> keep ours
-#        - everything else (upstream source, dependency and version bumps) -> take upstream
-#   4. Push that branch and open a pull request summarising what came from where.
+#   3. Resolve only the conflicts this fork owns outright (Linux packaging scripts, Linux
+#      CI, READMEs) by keeping ours. Every other conflict is a shared file: upstream changed
+#      it and so did the Linux work, so no rule can pick a side without dropping one. The run
+#      stops there, leaves the branch untouched, and asks for a human to replay the Linux
+#      patch on the upstream file.
+#   4. Otherwise push that branch and open a pull request summarising what came from where.
 #
 # Nothing is written to master automatically: a human or a follow-up review decides.
 
@@ -42,18 +44,22 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Paths this fork owns. Upstream touches some of them too (desktop packaging exists
-  # upstream as well), but on conflict we keep our side: Linux packaging is the entire
-  # reason this repository exists. Everything outside this list follows upstream.
+  # Paths this fork owns outright: files upstream either does not have or should never
+  # overwrite. Directories are listed member by member where upstream ships siblings of the
+  # same kind, so adding a shared file here is a deliberate decision rather than a side
+  # effect. Everything else is shared: shared files that conflict stop the run so a human
+  # replays the Linux patch on upstream's version, because keeping ours there would silently
+  # drop upstream's new dependencies, scripts, and channel semantics.
   OURS_PATHS: |
-    apps/desktop/scripts/
     apps/desktop/.env.linux.example
-    apps/desktop/README.md
-    apps/desktop/package.json
-    .github/workflows/desktop-linux.yml
-    .github/workflows/release-attach.yml
+    apps/desktop/scripts/linux-package-settings.d.mts
+    apps/desktop/scripts/linux-package-settings.mjs
+    apps/desktop/scripts/upload-selfhosted.d.mts
+    apps/desktop/scripts/upload-selfhosted.mjs
     .github/actions/prepare-linux-env/
     .github/actions/smoke-linux-appimage/
+    .github/workflows/desktop-linux.yml
+    .github/workflows/release-attach.yml
     README.md
     README.zh.md
 
@@ -136,13 +142,14 @@ jobs:
             {
               echo "### Conflict resolution"
               echo ""
-              echo "| file | kept |"
+              echo "| file | resolution |"
               echo "| --- | --- |"
             } > resolved.md
 
+            shared=""
             while IFS= read -r f; do
               [ -z "${f}" ] && continue
-              keep=theirs
+              keep=shared
               while IFS= read -r p; do
                 [ -z "${p}" ] && continue
                 case "${f}" in
@@ -152,27 +159,35 @@ jobs:
 
               if [ "${keep}" = "ours" ]; then
                 git checkout --ours -- "${f}" 2>/dev/null || true
+                git add -- "${f}" 2>/dev/null || true
+                echo "| \`${f}\` | ours (fork-owned) |" >> resolved.md
               else
-                git checkout --theirs -- "${f}" 2>/dev/null || true
-              fi
-              git add -- "${f}" 2>/dev/null || true
-              if [ "${keep}" = "ours" ]; then
-                echo "| \`${f}\` | ours — ⚠️ **upstream changes discarded, manual backfill required** |" >> resolved.md
-              else
-                echo "| \`${f}\` | ${keep} |" >> resolved.md
+                shared="${shared}${f}"$'\n'
+                echo "| \`${f}\` | shared: needs a hand merge |" >> resolved.md
               fi
             done <<< "${UNMERGED}"
 
-            # Anything still unresolved after the pass above (added/deleted combinations)
-            # falls back to upstream so the run never leaves the tree in a conflicted state.
-            STILL="$(git diff --name-only --diff-filter=U || true)"
-            if [ -n "${STILL}" ]; then
-              while IFS= read -r f; do
-                [ -z "${f}" ] && continue
-                git checkout --theirs -- "${f}" 2>/dev/null || true
-                git add -- "${f}" 2>/dev/null || true
-                echo "| \`${f}\` | theirs (fallback) |" >> resolved.md
-              done <<< "${STILL}"
+            if [ -n "${shared}" ]; then
+              # A shared file carries both an upstream change and the Linux work, so no rule
+              # picks a side without dropping one. Leave the branch untouched and stop.
+              git merge --abort 2>/dev/null || true
+              {
+                echo ""
+                echo "### Manual review required"
+                echo ""
+                echo "These files changed upstream and in the Linux work at the same time:"
+                echo ""
+                printf "%b" "${shared}" | while IFS= read -r f; do
+                  [ -n "${f}" ] && echo "- \`${f}\`"
+                done
+                echo ""
+                echo "Merge upstream by hand: take upstream's file, then replay the Linux change"
+                echo "on it. Keeping ours would discard upstream's new dependencies, scripts, and"
+                echo "channel semantics; taking theirs would discard the Linux support."
+              } >> resolved.md
+              cat resolved.md
+              echo "::error::Shared files conflict with upstream; a human must replay the Linux patch."
+              exit 1
             fi
 
             if git diff --cached --quiet 2>/dev/null; then
@@ -188,11 +203,11 @@ jobs:
             echo ""
             cat resolved.md
             echo ""
-            echo "> ⚠️ **Every \`ours\` row threw upstream's version of that file away.** Keeping"
-            echo "> ours is deliberate — this fork's Linux packaging lives in those files — but"
-            echo "> whatever upstream changed in them is absent from this branch and has to be"
-            echo "> re-applied by hand. Diff each \`ours\` file against upstream \`${SHA:0:12}\`"
-            echo "> before merging, or the next sync will silently re-drop it again."
+            echo "> \`ours\` rows are files upstream does not own."
+            echo ">"
+            echo "> Shared files never resolve automatically: when one conflicts, the run stops"
+            echo "> before pushing and asks a human to take upstream's file and replay the Linux"
+            echo "> change on it."
           } > pr-body.md
           cat pr-body.md
 
