@@ -7,8 +7,13 @@
 #   check   - validate the packaging configuration and toolchain (also runs on pull requests)
 #   package - build one architecture per matrix leg: AppImage (the auto-update carrier),
 #             Debian .deb, and portable tar.gz
-#   publish - push both feeds to the self-hosted server; runs only when the
-#             DSH_SELFHOST_PUBLISH repository variable is "true"
+#   publish - push both feeds to the self-hosted server; an operator must start the run by
+#             hand, set publish_selfhost, and set the DSH_SELFHOST_PUBLISH variable
+#
+# Packaging never uploads anything. The self-hosted deployment stays a supported setting so a
+# fork can publish on its own server during a maintenance window, but no push or pull-request
+# run contacts an upload endpoint, and a prerelease build is never promoted to the stable
+# channel.
 #
 # Linux builds carry no code-signing stage. Nothing references Tencent COS: the
 # self-hosted deployment publishes over SSH through apps/desktop/scripts/upload-selfhosted.mjs.
@@ -40,13 +45,23 @@ on:
         description: HTTPS origin of the self-hosted update server.
         required: false
         default: https://sswwgzs.cn
+      publish_selfhost:
+        description: Publish both Linux feeds to the self-hosted server. Requires an operator window.
+        required: false
+        type: boolean
+        default: false
+      attach_release:
+        description: Attach the packaged Linux artifacts to the GitHub release for this version.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   actions: write
 
 env:
-  PRIMARY_NODE_VERSION: '24'
+  PRIMARY_NODE_VERSION: '24.9.0'
   DSH_TELEMETRY_DISABLED: '1'
   # Origin and directory of the self-hosted feed. Override per run with workflow_dispatch,
   # or permanently with the DSH_SELFHOST_ORIGIN / DSH_SELFHOST_PREFIX repository variables.
@@ -223,7 +238,9 @@ jobs:
     name: Publish Linux feeds to the self-hosted server
     runs-on: ubuntu-24.04
     needs: package
-    if: github.event_name != 'pull_request' && vars.DSH_SELFHOST_PUBLISH == 'true'
+    # Nothing publishes by itself: no push, pull request, or scheduled run reaches an upload
+    # endpoint. An operator starts this job by hand after a packaging run was verified.
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_selfhost == true && vars.DSH_SELFHOST_PUBLISH == 'true'
     # A gigabyte-scale push to a distant server is slow, and the receiving host throttles
     # inbound traffic, so a full publish is measured in hours rather than minutes. The
     # hard ceiling keeps a stalled transfer from silently occupying the runner until the
@@ -315,8 +332,8 @@ jobs:
   release:
     name: Attach the Linux packages to a GitHub release
     runs-on: ubuntu-24.04
-    needs: publish
-    if: github.event_name != 'pull_request' && vars.DSH_SELFHOST_PUBLISH == 'true'
+    needs: package
+    if: github.event_name == 'workflow_dispatch' && inputs.attach_release == true
     timeout-minutes: 60
     permissions:
       contents: write
