@@ -7,7 +7,7 @@ import { workerImage, workerProjection } from './image-worker-protocol.ts'
 import type { PreparedImageFile } from './store.ts'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { AttachmentError, AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type {
   FileAttachmentRef,
   ImageAttachmentLimits,
