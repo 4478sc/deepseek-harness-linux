@@ -423,7 +423,7 @@ jobs:
   # through the same "all" scenario the Python workflow uses. This is the path that failed
   # in ci-python; the minimal snapshot cannot stand in for it.
   python-full:
-    name: python all-scenario (${{ matrix.tree }})
+    name: python all-scenario
     if: github.event_name == 'workflow_dispatch' && (inputs.lanes == 'all' || contains(inputs.lanes, 'python'))
     runs-on: ubuntu-24.04
     timeout-minutes: 120
