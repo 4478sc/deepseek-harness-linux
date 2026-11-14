@@ -7,7 +7,7 @@ function fixture(platform: NodeJS.Platform = 'linux') {
   const ctx = new Context()
   configureImageWorker(ctx, '/relocated application/runtime/primary-runtime', platform)
   const fiber = { entry: { options: { name: '@deepseek-ai/dsh-attachment-local' } } } as Fiber
-  const resolve = (config: object): unknown => ctx.waterfall(fiber, 'internal/config', config, () => config)
+  const resolve = (config: object): unknown => ctx.waterfall(fiber, 'internal/config', fiber, () => config)
   return { ctx, fiber, resolve }
 }
 it('selects bundled standalone Node and preserves limits across repeated configuration', () => {

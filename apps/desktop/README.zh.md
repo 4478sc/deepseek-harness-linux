@@ -21,6 +21,7 @@ Desktop 在原生应用中运行 Harness 工作区。本参考文档说明应用
 - [故障恢复与诊断](docs/diagnostics/README.zh.md)
 - [开发](#develop)
 - [打包](#package)
+- [Linux 打包与自托管更新](#linux-打包与自托管更新)
 - [Windows 安装界面](#windows-installer-interface)
 - [更新](#updates)
 - [底层开发覆盖项](#low-level-development-overrides)
@@ -245,6 +246,18 @@ Desktop 在 Host 启动后、打开工作区前检查模型 API Key 引用是否
 - [Desktop 打包](packaging/README.zh.md)：本地与 Actions 构建、版本、部署配置、产物、日志和验收。
 - [Windows 签名与 runner 运维](windows-signing/README.zh.md)：机器部署、已接受的隔离风险、签名凭据、Token 失败与缓存维护。
 - [Desktop 发布](publishing/README.zh.md)：上传凭据、发布标识、固定下载、更新清单和上传恢复。
+
+<a id="linux-打包与自托管更新"></a>
+
+## Linux 打包与自托管更新
+
+本仓库在上游的 macOS 与 Windows 目标之外增加了 Linux 打包。`pnpm run package:linux:x64` 与 `pnpm run package:linux:arm64` 为一个目标完成准备、构建与烟测，带 `:dir` 的变体只产出解包目录。每次运行在 `apps/desktop/.desktop-build/targets/<target>/artifacts` 下写出 AppImage、Debian 包与便携 `.tar.gz`。Linux 包不做代码签名，只读取 [.env.linux](.env.linux.example)，从不读取 macOS 或 Windows 的签名文件。构建主机需要 AppImage 工具链（FUSE 2，Ubuntu 24.04 起为 `libfuse2t64`）与归档解压工具；[.github/actions/prepare-linux-env](../../.github/actions/prepare-linux-env/action.yml) 在 CI 中安装它们。
+
+Linux 把图像编解码器留在 Electron 进程之外。[attachment-local 包](../../packages/attachment/attachment-local/README.zh.md)以 `lib/image-worker.js` 交付一个 standalone Node worker，Desktop Host 把 profile 指向它，因此 Sharp 与 libvips 在子进程中加载，原生崩溃只影响那一次图像操作。ASAR 保留该 worker 入口、它的包清单，以及 Sharp 的外部依赖为实体文件，`scripts/check-workspace-constraints.ts` 要求该 worker bundle 始终是已发布的包文件。
+
+更新清单沿用上游渠道名 `nightly` 与 `stable`；Linux 清单除 x64 外带架构后缀，因为 electron-builder 与 electron-updater 都这样命名。`upload:latest:linux:x64` 与 `upload:latest:linux:arm64` 替换固定的 AppImage 下载，带版本的上传还会把 Debian 包与 `.tar.gz` 一并发布到发布二进制目录。[.github/workflows/desktop-linux.yml](../../.github/workflows/desktop-linux.yml) 构建两种架构，执行 AppImage 烟测与打包产物安装检查，并把三种产物附加到 GitHub Release；[.github/workflows/release-attach.yml](../../.github/workflows/release-attach.yml) 为已有 Release 重复该附加。自托管部署（`DSH_DESKTOP_AUTO_UPDATE_ENV=selfhosted` 加 `DOWNLOAD_SELFHOST_ORIGIN` 与 `DOWNLOAD_SELFHOST_PREFIX`）与 [scripts/upload-selfhosted.mjs](scripts/upload-selfhosted.mjs) 保留给运维自有的服务器，其更新清单放在一个由各架构共享的扁平目录。本分支不发布自托管更新清单，也不连接任何第三方上传端点：预发布构建永远不会被提升为 `stable`。
+
+ARM64 打包选择目标原生的 Sharp 依赖并使用同一个 worker；本分支尚无 ARM64 机器运行过打包烟测。
 
 <a id="windows-uninstall-rules"></a>
 

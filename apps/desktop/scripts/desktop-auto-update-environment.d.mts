@@ -5,7 +5,7 @@ export const DESKTOP_AUTO_UPDATE_ENV: 'DSH_DESKTOP_AUTO_UPDATE_ENV'
 export type DesktopAutoUpdateEnvironment = 'test' | 'production' | 'selfhosted'
 
 /** Update channel embedded in the installer. */
-export type DesktopAutoUpdateChannel = 'nightly' | 'latest'
+export type DesktopAutoUpdateChannel = 'nightly' | 'stable'
 
 /** Directory name of one officially supported Desktop release target. */
 export type DesktopAutoUpdateTarget = 'mac-arm64' | 'mac-x64' | 'win-x64'
