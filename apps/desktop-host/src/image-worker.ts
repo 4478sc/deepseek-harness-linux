@@ -1,6 +1,6 @@
 /** Desktop-owned image isolation using the bundled standalone Node payload. */
 import { join } from 'node:path'
-import type { Context, Fiber } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 
 /**
@@ -11,9 +11,9 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
  */
 export function configureImageWorker(ctx: Context, primaryRuntime: string, platform: NodeJS.Platform): void {
   if (platform !== 'linux') return
-  ctx.on('internal/config', function (this: Fiber, _raw, next) {
+  ctx.on('internal/config', (fiber, next) => {
     const config: unknown = next()
-    if (this.entry?.options.name !== '@deepseek-ai/dsh-attachment-local') return config
+    if (fiber.entry?.options.name !== '@deepseek-ai/dsh-attachment-local') return config
     if (config !== undefined && (typeof config !== 'object' || config === null || Array.isArray(config))) {
       throw new Error('attachment-local: expected an object configuration')
     }

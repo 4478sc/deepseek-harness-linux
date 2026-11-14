@@ -108,8 +108,35 @@ function checkKoffi() {
 
 /** Encode and decode a pixel through the packaged libvips binary. */
 async function checkSharp() {
-  const sharp = requireRuntime('sharp')
   const pixel = Buffer.from([17, 103, 231])
+  if (process.platform === 'linux') {
+    // Linux runs image codecs in a standalone Node process: Sharp's bundled libvips crashes
+    // inside the Electron process on that platform, which is why the Desktop Host points the
+    // attachment worker at this same executable. Loading it here would test the crash, not
+    // the payload.
+    const script = join(scratch, 'sharp.cjs')
+    writeFileSync(script, [
+      "const assert = require('node:assert/strict')",
+      "const { createRequire } = require('node:module')",
+      "const { join } = require('node:path')",
+      "const sharp = createRequire(join(process.argv[2], 'package.json'))('sharp')",
+      "const pixel = Buffer.from([17, 103, 231])",
+      'sharp(pixel, { raw: { width: 1, height: 1, channels: 3 } }).png().toBuffer().then(async png => {',
+      "  const decoded = await sharp(png).raw().toBuffer({ resolveWithObject: true })",
+      '  assert.equal(decoded.info.width, 1)',
+      '  assert.equal(decoded.info.height, 1)',
+      '  assert.equal(decoded.info.channels, 3)',
+      '  assert.deepEqual(decoded.data, pixel)',
+      "  process.stdout.write('runtime-payload-sharp-ok')",
+      '})',
+      '',
+    ].join('\n'), { flag: 'wx', mode: 0o600 })
+    const node = join(resourcesRuntime, 'primary-runtime', 'dependencies', 'node', 'bin', 'node')
+    const output = execFileSync(node, [script, root], { encoding: 'utf8' })
+    assert.match(output, /runtime-payload-sharp-ok/u)
+    return
+  }
+  const sharp = requireRuntime('sharp')
   const png = await sharp(pixel, { raw: { width: 1, height: 1, channels: 3 } }).png().toBuffer()
   const decoded = await sharp(png).raw().toBuffer({ resolveWithObject: true })
   assert.equal(decoded.info.width, 1)
