@@ -34,8 +34,6 @@ concurrency:
 env:
   # Same pin as the upstream Linux lanes (package.json requires Node >= 24.9.0).
   NODE_VERSION: '24.9'
-  # Keep the Playwright download out of the workspace so the tree stays clean.
-  PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
 
 jobs:
   typecheck-and-lint:
@@ -124,6 +122,7 @@ jobs:
     timeout-minutes: 120
     env:
       DSH_GATE_FAIL_FAST: '1'
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
     steps:
       - uses: actions/checkout@v4
         with:
@@ -176,6 +175,7 @@ jobs:
     env:
       DSH_GATE_FAIL_FAST: '1'
       DSH_NODE_COMPAT_SKIP_TYPECHECK: '1'
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
     steps:
       - uses: actions/checkout@v4
         with:
