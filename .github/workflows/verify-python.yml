@@ -1,0 +1,103 @@
+# Fork-only Python reproduction lane.
+#
+# ci-python runs the release-shaped executable and installed wheels, then the "all"
+# scenario black box. Its jobs target the upstream enterprise runners, so this fork runs
+# the same path on the free ubuntu-24.04 image against both the branch and the fixed tag.
+name: Fork python
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+  UPSTREAM_REF: dsh-v0.2.2-rc.3
+
+jobs:
+  all-scenario:
+    name: installed-wheel all scenario
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [fork, upstream]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the fixed upstream tag in a worktree
+        if: matrix.tree == 'upstream'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/$UPSTREAM_REF:refs/tags/baseline-upstream"
+          git worktree add ../baseline refs/tags/baseline-upstream
+
+      - name: Record the checkout
+        id: tree
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.tree }}" = "upstream" ]; then
+            echo "dir=../baseline" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git -C ../baseline rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=." >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install (immutable)
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the release-shaped single executable
+        working-directory: ${{ steps.tree.outputs.dir }}
+        env:
+          DSH_BUILD_CLIENT_PROFILE: official
+        run: pnpm exec tsx scripts/build-exe-for-python-sdk.ts --targets=node24-linux-x64 --build-artifacts
+
+      - name: Build the runtime and SDK wheels
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: |
+          set -euo pipefail
+          python3 scripts/build-python-release.py --package runtime --platform linux-x64 --runtime-exe "$PWD/dist-exe/deepseek-harness-sdk-runtime-linux-x64" --output-dir dist-python
+          python3 scripts/build-python-release.py --package sdk --output-dir dist-python
+          ls -l dist-python
+
+      - name: Install the wheels into a clean virtual environment
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv-smoke
+          .venv-smoke/bin/python -m pip install --disable-pip-version-check dist-python/*.whl
+
+      - name: Run the installed-wheel all-scenario black box
+        id: smoke
+        working-directory: ${{ steps.tree.outputs.dir }}
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/dsh-python-all
+          cd /tmp/dsh-python-all
+          "$GITHUB_WORKSPACE/${{ steps.tree.outputs.dir }}/.venv-smoke/bin/python" "$GITHUB_WORKSPACE/${{ steps.tree.outputs.dir }}/scripts/smoke-python-runtime.py" --scenario all --installed-wheel > python-all.log 2>&1
+          echo "python_exit=$?"
+          tail -n 150 python-all.log
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "tree=${{ matrix.tree }} sha=${{ steps.tree.outputs.sha }} outcome=${{ steps.smoke.outcome }}"
+          grep -n "model-visible" /tmp/dsh-python-all/python-all.log | head -n 80 || true
