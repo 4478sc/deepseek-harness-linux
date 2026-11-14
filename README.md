@@ -38,7 +38,7 @@ Supported architectures: `x64` (AMD / Intel) and `arm64` (Raspberry Pi 5, Linux 
 
 ### Option 1: AppImage (recommended, supports auto-update)
 
-1. Download the `.AppImage` for your architecture from [Releases](../../releases).
+1. Download the `.AppImage` for your architecture from [Releases](https://github.com/4478sc/deepseek-harness-linux/releases).
 2. Install the runtime dependency; AppImage needs FUSE 2:
    ```sh
    sudo apt install libfuse2          # Debian / Ubuntu; libfuse2t64 on 24.04 and later

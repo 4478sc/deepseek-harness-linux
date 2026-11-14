@@ -38,7 +38,7 @@
 
 ### 方式一：AppImage（推荐，支持自动更新）
 
-1. 到 [Releases](../../releases) 下载对应架构的 `.AppImage`。
+1. 到 [Releases](https://github.com/4478sc/deepseek-harness-linux/releases) 下载对应架构的 `.AppImage`。
 2. 安装运行时依赖（AppImage 需要 FUSE 2）：
    ```sh
    sudo apt install libfuse2          # Debian / Ubuntu

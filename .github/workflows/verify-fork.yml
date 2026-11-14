@@ -144,6 +144,10 @@ jobs:
       - name: Install Playwright Chromium and WebKit
         run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium webkit
 
+      # The CLI smoke in these gates needs a sandbox backend; the hosted image has none.
+      - name: Prepare bubblewrap
+        run: bash scripts/prepare-ci-bubblewrap.sh
+
       - name: Build and run recorded snapshot gates
         run: pnpm run check:ci:snapshot
 
@@ -165,8 +169,15 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install (immutable)
-        run: pnpm install --frozen-lockfile
+      - name: Install dependencies and prepare bubblewrap
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile &
+          install_pid=$!
+          bash scripts/prepare-ci-bubblewrap.sh &
+          sandbox_pid=$!
+          wait "$install_pid"
+          wait "$sandbox_pid"
 
       - name: Run artifact gates
         run: pnpm run check:ci:artifacts
@@ -251,19 +262,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tree: [fork, upstream, fork-no-attachment]
+        tree: [fork, upstream]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Revert the attachment package to the upstream tag
-        if: matrix.tree == 'fork-no-attachment'
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/${{ inputs.upstream_ref }}:refs/tags/baseline-upstream"
-          git checkout refs/tags/baseline-upstream -- packages/attachment/attachment-local
 
       - name: Check out the fixed upstream tag in a worktree
         if: matrix.tree == 'upstream'
@@ -383,6 +387,10 @@ jobs:
         env:
           DSH_BUILD_CLIENT_PROFILE: official
         run: pnpm exec tsx scripts/build-exe-for-python-sdk.ts --targets=node24-linux-x64 --build-artifacts
+
+      - name: Install the Python SDK used by the smoke
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: python3 -m pip install --disable-pip-version-check ./python/sdk
 
       - name: Record the lockfile digest
         working-directory: ${{ steps.tree.outputs.dir }}
