@@ -3,8 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write README.md
 /deepseek-harness-linux-desktop:
-  en: 12cba4cc0d3ce304
-  zh: 4d2643211dd95b2a
+  en: 1664586c48672aee
+  zh: f510eb14298bde58
 /deepseek-harness-linux-desktop/what-this-is-and-what-it-is-not:
   en: db211d40f540a1f2
   zh: 6702e1c4b11c14b9
@@ -13,19 +13,19 @@
   zh: c2e9e04111856974
 /deepseek-harness-linux-desktop/artifacts:
   en: f736b6082e863e12
-  zh: 41ebc92f85ae35c5
+  zh: eb846d634d26717d
 /deepseek-harness-linux-desktop/quick-start:
   en: 9535b10be9abb7a8
   zh: 37665fe48339b410
 /deepseek-harness-linux-desktop/quick-start/option-1-appimage-recommended-supports-auto-update:
-  en: 76434323bceb9124
-  zh: 6bc9e97f5ca7dfd1
+  en: 6f62715c0ce1b616
+  zh: d455f2a0d7b4785e
 /deepseek-harness-linux-desktop/quick-start/option-2-deb:
   en: 68cad847accb3b21
   zh: 28af93bbd460fbdf
 /deepseek-harness-linux-desktop/quick-start/option-3-tar-gz-portable:
   en: a4dcd116a80ebe27
-  zh: 8758aec00e6cbb0e
+  zh: a324c3dc3ca49a2c
 /deepseek-harness-linux-desktop/building-from-source:
   en: 9254a615b2652ddd
   zh: 7cdc0370123331a1

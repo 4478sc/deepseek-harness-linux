@@ -1,5 +1,7 @@
 # DeepSeek Harness · Linux Desktop
 
+English | [中文](README.zh.md)
+
 > Community Linux desktop packaging for the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) desktop app: an open-source (MIT) DeepSeek desktop client that installs and updates on Linux, shipped as AppImage, Debian `.deb` and portable `.tar.gz` for x64 and arm64, with native CI and AppImage auto-updates.
 
 **In one line**: a DeepSeek desktop client for Linux that you can download, install and update (DeepSeek desktop for Linux). Every agent, plugin and network capability of the official build stays; you can run `dsh web` locally or install the native desktop client, and your data stays on the machine.

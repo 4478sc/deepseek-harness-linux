@@ -1,5 +1,7 @@
 # DeepSeek Harness · Linux 桌面版
 
+[English](README.md) | 中文
+
 > 给官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 桌面端补上**社区 Linux 桌面端打包** —— 开源（MIT）DeepSeek 桌面客户端，开箱即用的 AppImage / `.deb` / `.tar.gz`，覆盖 x64 与 arm64 双架构，配套原生 CI 与 AppImage 自动更新。
 
 **一句话定位**：在 Linux 上「能下载、能装、能更新」的 DeepSeek 桌面端（DeepSeek desktop for Linux）。完整保留官方 agent / 插件 / 联网能力，既可本地自托管运行 `dsh web`，也能装上原生桌面客户端，数据始终留在本机。
@@ -34,6 +36,8 @@
 
 支持架构：`x64`（AMD / Intel）、`arm64`（树莓派 5、Apple Silicon 上的 Linux、ARM 服务器等）。
 
+<a id="quick-start"></a>
+
 ## 快速开始
 
 ### 方式一：AppImage（推荐，支持自动更新）
@@ -41,8 +45,8 @@
 1. 到 [Releases](https://github.com/4478sc/deepseek-harness-linux/releases) 下载对应架构的 `.AppImage`。
 2. 安装运行时依赖（AppImage 需要 FUSE 2）：
    ```sh
-   sudo apt install libfuse2          # Debian / Ubuntu
-   # Fedora / RHEL 系: sudo dnf install fuse2
+   sudo apt install libfuse2          # Debian / Ubuntu; libfuse2t64 on 24.04 and later
+   # Fedora / RHEL: sudo dnf install fuse2
    ```
 3. 赋予执行权限并运行：
    ```sh
@@ -54,7 +58,7 @@
 
 ```sh
 sudo dpkg -i deepseek-harness-*-linux-x64.deb
-deepseek-harness            # 或直接从应用菜单启动
+deepseek-harness            # or start it from the application menu
 ```
 
 ### 方式三：.tar.gz（便携）
@@ -62,10 +66,12 @@ deepseek-harness            # 或直接从应用菜单启动
 ```sh
 tar -xzf deepseek-harness-*-linux-x64.tar.gz
 cd deepseek-harness-*-linux-x64
-./deepseek-harness          # 运行解压目录内的启动入口
+./deepseek-harness          # the launcher inside the unpacked directory
 ```
 
 > 在无显示环境（如远程服务器 + VNC）运行时，确保已设置 `DISPLAY`（例如 xfce4 + TigerVNC 下的 `:1`），桌面会自动拉起。
+
+<a id="building-from-source"></a>
 
 ## 从源码构建（开发者）
 
@@ -75,7 +81,7 @@ cd deepseek-harness-*-linux-x64
 git clone https://github.com/4478sc/deepseek-harness-linux.git
 cd deepseek-harness-linux
 pnpm install
-cp apps/desktop/.env.linux.example apps/desktop/.env.linux   # 按需填写发布设置
+cp apps/desktop/.env.linux.example apps/desktop/.env.linux   # fill in release settings as needed
 pnpm --dir apps/desktop run package:linux:x64                # x64
 pnpm --dir apps/desktop run package:linux:arm64              # arm64
 ```
