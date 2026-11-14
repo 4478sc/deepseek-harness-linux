@@ -40,7 +40,7 @@ npx @deepseek-ai/dsh web
 如需从仓库源码运行：
 
 ```sh
-git clone https://github.com/Zhou-Yujing114514/deepseek-harness-linux.git
+git clone https://github.com/4478sc/deepseek-harness-linux.git
 cd deepseek-harness-linux
 pnpm install
 pnpm run build
@@ -51,7 +51,7 @@ pnpm dsh web
 
 ### Linux 桌面端（本仓库新增）
 
-桌面应用可在 Ubuntu 24.04（或兼容发行版）上打包，支持两种架构（x64/ARM64），每种架构产出三种安装格式（AppImage、Debian `.deb`、便携 `.tar.gz`）：
+桌面应用可在 Ubuntu 24.04（或兼容发行版）上打包，需要 Node.js ≥ 24.9 与 pnpm 11.28.5（`packageManager` 固定），支持两种架构（x64/ARM64），每种架构产出三种安装格式（AppImage、Debian `.deb`、便携 `.tar.gz`）：
 
 ```sh
 pnpm install

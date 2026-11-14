@@ -30,7 +30,7 @@
 | **.deb** | Debian / Ubuntu 系原生包管理 | `deepseek-harness-<版本>-linux-amd64.deb` |
 | **.tar.gz** | 便携解压即用 | `deepseek-harness-<版本>-linux-x64.tar.gz` |
 
-> 文件名中的 `<版本>` 替换为实际发布版本（当前为 `0.2.1-rc.2`）。
+> 文件名中的 `<版本>` 替换为实际发布版本（当前为 `0.2.2-rc.3`）。
 
 支持架构：`x64`（AMD / Intel）、`arm64`（树莓派 5、Apple Silicon 上的 Linux、ARM 服务器等）。
 
@@ -69,10 +69,10 @@ cd deepseek-harness-*-linux-x64
 
 ## 从源码构建（开发者）
 
-需要 Node.js 24+、pnpm，以及构建主机上的 `libfuse2`（AppImage 组装所需）。
+需要 Node.js ≥ 24.9、pnpm 11.28.5（`packageManager` 固定），以及构建主机上的 `libfuse2`（AppImage 组装所需；Ubuntu 24.04+ / Debian 13 是 `libfuse2t64`）。
 
 ```sh
-git clone https://github.com/Zhou-Yujing114514/deepseek-harness-linux.git
+git clone https://github.com/4478sc/deepseek-harness-linux.git
 cd deepseek-harness-linux
 pnpm install
 cp apps/desktop/.env.linux.example apps/desktop/.env.linux   # 按需填写发布设置
