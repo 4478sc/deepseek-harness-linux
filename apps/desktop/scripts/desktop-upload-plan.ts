@@ -9,6 +9,7 @@ import type { DesktopPackageTargetName } from './package-target.ts'
 import type { DesktopAutoUpdateEnvironment } from './desktop-auto-update-environment.mjs'
 import {
   desktopBuildRecordFilename,
+  desktopLatestInstallerFilename,
   desktopUpdateMetadataFilename,
   resolveDesktopUploadConfig,
 } from './desktop-auto-update-environment.mjs'
@@ -35,6 +36,8 @@ export interface DesktopUploadArtifact {
   readonly filename: string
   readonly key: string
   readonly contentType: string
+  /** Browser save name for fixed website downloads, preserving the validated installer basename. */
+  readonly contentDisposition?: string
   readonly channelMetadata: boolean
   /** Published YAML with normalized artifact URLs; binary bytes remain file-backed. */
   readonly contents?: string
@@ -61,6 +64,8 @@ export interface DesktopUploadPlan {
 export interface DesktopUploadPlanOptions {
   /** Publish only the installer at its fixed download URL, replacing the previous object. */
   readonly latest?: boolean
+  /** Percentage of installations eligible for this publication; absent preserves packaged metadata. */
+  readonly stagingPercentage?: number | undefined
   readonly environment?: NodeJS.ProcessEnv
   readonly repositoryRoot?: string
   readonly appRoot?: string
@@ -221,7 +226,7 @@ export async function createDesktopUploadPlan(
     throw new Error(`desktop upload: ${targetName} package completion record for ${buildVersion} does not match the ${update.environment} update destination`)
   }
 
-  if (update.channel === 'latest' && buildVersion.includes('-')) throw new Error('desktop upload: latest requires a stable version')
+  if (update.channel === 'stable' && buildVersion.includes('-')) throw new Error('desktop upload: stable requires a version without a prerelease suffix')
   const metadataFilename = desktopUpdateMetadataFilename(buildVersion, target.platform, update.channel, target.arch)
   const metadataPath = join(artifactsRoot, metadataFilename)
   let metadataValue: unknown
@@ -286,6 +291,7 @@ export async function createDesktopUploadPlan(
   const payloadUrl = `${update.origin}/${binaryPrefix}/${updaterInfo.filename}`
   const published = {
     ...metadata,
+    ...(options.stagingPercentage === undefined ? {} : { stagingPercentage: options.stagingPercentage }),
     files: [{ ...object(metadata.files[0], `${metadataFilename}.files[0]`), url: payloadUrl }],
     ...(metadata.path === undefined ? {} : { path: payloadUrl }),
   }
@@ -294,7 +300,7 @@ export async function createDesktopUploadPlan(
     contents: dump(published),
   }
   artifacts.push(channelArtifact)
-  const latestFilename = `dsh-latest-${target.platform === 'darwin' ? 'macos' : target.platform === 'linux' ? 'linux' : 'windows'}-${target.arch}.${target.platform === 'darwin' ? 'dmg' : target.platform === 'linux' ? 'AppImage' : 'exe'}`
+  const latestFilename = desktopLatestInstallerFilename(targetName)
   const latestKey = `desktop/${latestFilename}`
   return {
     environment: update.environment,
@@ -304,7 +310,8 @@ export async function createDesktopUploadPlan(
     bucket: update.bucket,
     secretIdEnvName: update.secretIdEnvName,
     secretKeyEnvName: update.secretKeyEnvName,
-    artifacts: options.latest ? [{ ...installerArtifact, filename: latestFilename, key: latestKey }] : artifacts,
+    artifacts: options.latest ? [{ ...installerArtifact, filename: latestFilename, key: latestKey,
+      contentDisposition: `attachment; filename="${installerArtifact.filename}"` }] : artifacts,
     ...typeof buildRecord.commit === 'string' ? { commit: buildRecord.commit } : {},
     ...typeof buildRecord.dirty === 'boolean' ? { dirty: buildRecord.dirty } : {},
   }
