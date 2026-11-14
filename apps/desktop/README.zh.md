@@ -21,7 +21,7 @@ Desktop 在原生应用中运行 Harness 工作区。本参考文档说明应用
 - [故障恢复与诊断](docs/diagnostics/README.zh.md)
 - [开发](#develop)
 - [打包](#package)
-- [Linux 打包与自托管更新](#linux-打包与自托管更新)
+- [Linux 打包与自托管更新](#linux-packaging-and-self-hosted-updates)
 - [Windows 安装界面](#windows-installer-interface)
 - [更新](#updates)
 - [底层开发覆盖项](#low-level-development-overrides)
@@ -248,6 +248,8 @@ Desktop 在 Host 启动后、打开工作区前检查模型 API Key 引用是否
 - [Desktop 发布](publishing/README.zh.md)：上传凭据、发布标识、固定下载、更新清单和上传恢复。
 
 <a id="linux-打包与自托管更新"></a>
+
+<a id="linux-packaging-and-self-hosted-updates"></a>
 
 ## Linux 打包与自托管更新
 
