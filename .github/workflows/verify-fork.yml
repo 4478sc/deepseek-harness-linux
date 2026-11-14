@@ -96,9 +96,11 @@ jobs:
     name: coverage gate (hosted)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       DSH_GATE_FAIL_FAST: '1'
+      # Same per-test budget the upstream coverage lane grants on a shared host.
+      DSH_COVERAGE_TEST_TIMEOUT_MS: '90000'
     steps:
       - uses: actions/checkout@v4
         with:
