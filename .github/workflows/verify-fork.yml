@@ -1,15 +1,14 @@
 # Fork-only verification lane.
 #
-# Upstream's CI routes its Linux enterprise jobs (static, lint, coverage, snapshots)
-# to the custom runner label `dsh-ubuntu-24-04-16core`, or to a Blacksmith or
-# self-hosted failover pool selected by DSH_CI_FAILOVER_LINUX. This fork registers
-# none of those, so those jobs stay queued forever here while the jobs on the
+# Upstream's CI routes its Linux enterprise jobs (static, lint, coverage, snapshots,
+# artifacts, consumers) to the custom runner label `dsh-ubuntu-24-04-16core`, or to a
+# Blacksmith or self-hosted failover pool selected by DSH_CI_FAILOVER_LINUX. This fork
+# registers none of those, so those jobs stay queued forever here while the jobs on the
 # free GitHub-hosted image (benchmarks, the Node compatibility matrix) run.
 #
-# This workflow runs the same commands on ubuntu-24.04, the free GitHub-hosted
-# image, so a fork can close the type-check and lint gates without a paid or
-# self-hosted runner. It reads the repository only: no secrets, no publish, no
-# deploy, no external service.
+# These jobs run the same gate commands on ubuntu-24.04, the free GitHub-hosted image,
+# with their upstream semantics and thresholds untouched. They read the repository only:
+# no secrets, no publish, no deploy, no external service.
 name: Fork verification
 
 on:
@@ -17,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       baseline:
-        description: Compare the failing benchmark lane against the fixed upstream tag.
+        description: Compare the failing benchmark and Python lanes against the fixed upstream tag.
         type: boolean
         default: false
       upstream_ref:
@@ -32,6 +31,12 @@ concurrency:
   group: fork-verify-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Same pin as the upstream Linux lanes (package.json requires Node >= 24.9.0).
+  NODE_VERSION: '24.9'
+  # Keep the Playwright download out of the workspace so the tree stays clean.
+  PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+
 jobs:
   typecheck-and-lint:
     name: typecheck and lint (hosted)
@@ -40,7 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The archive gate reads the trusted PR base commit.
           fetch-depth: 0
           persist-credentials: false
 
@@ -48,24 +52,162 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # package.json requires Node >= 24.9.0.
-          node-version: '24.9'
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install (immutable)
         run: pnpm install --frozen-lockfile
 
-      # Same step as the upstream lint job: oxlint's type-aware rules read the
-      # compiled package declarations.
       - name: Compile package declarations
         run: pnpm run typecheck
 
       - name: Run lint and duplication
         run: pnpm run check:ci:lint:contracts-ready
 
+  # The upstream static lane: archive, ownership, doc and config gates. It owns no build.
+  static:
+    name: static gates (hosted)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DSH_GATE_FAIL_FAST: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run static gates
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=50 origin master
+          echo "DSH_ARCHIVE_BASE_REF=$(git merge-base origin/master HEAD)" >> "$GITHUB_ENV"
+          pnpm run check:ci:static
+
+  coverage:
+    name: coverage gate (hosted)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      DSH_GATE_FAIL_FAST: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run coverage gates
+        run: pnpm run check:ci:coverage
+
+  snapshots:
+    name: snapshot gate (hosted)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      DSH_GATE_FAIL_FAST: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium and WebKit
+        run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium webkit
+
+      - name: Build and run recorded snapshot gates
+        run: pnpm run check:ci:snapshot
+
+  artifacts:
+    name: artifact gate (hosted)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DSH_GATE_FAIL_FAST: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run artifact gates
+        run: pnpm run check:ci:artifacts
+
+  consumers:
+    name: consumer gates (hosted)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      DSH_GATE_FAIL_FAST: '1'
+      DSH_NODE_COMPAT_SKIP_TYPECHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies and prepare bubblewrap
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile &
+          install_pid=$!
+          bash scripts/prepare-ci-bubblewrap.sh &
+          sandbox_pid=$!
+          wait "$install_pid"
+          wait "$sandbox_pid"
+
+      - name: Install Playwright Chromium and WebKit
+        run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium webkit
+
+      - name: Build and execute the Linux Office runtime
+        run: CI=true pnpm run prepare:primary-runtime --target linux-x64 --output "$RUNNER_TEMP/office-runtime" --cache "$RUNNER_TEMP/office-runtime-downloads"
+
+      - name: Run compatibility, snapshot, and artifact gates
+        run: pnpm run check:ci:consumers
+
   benchmark-reproduction:
     name: benchmark lane (hosted, dispatch only)
-    # A failing benchmark needs one reproduction on an idle hosted runner; keep it
-    # out of the pull-request lane so it never competes with the gates above.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -78,7 +220,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24.9'
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install (immutable)
         run: pnpm install --frozen-lockfile
@@ -91,9 +233,8 @@ jobs:
           DSH_GATE_VERBOSE: '1'
         run: pnpm run check:ci:bench
 
-  # Baseline comparison for one failing lane. The upstream tag is checked out in a
-  # separate git worktree inside the runner workspace, so both trees build their own
-  # dependencies from their own lockfile and run the identical command.
+  # Isolated comparison for the failing benchmark lane: the upstream tag lives in its own
+  # worktree, so both trees build their own dependencies from their own lockfile.
   baseline-bench:
     name: baseline benchmark (${{ matrix.tree }})
     if: github.event_name == 'workflow_dispatch' && inputs.baseline == true
@@ -109,15 +250,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # Root-cause probe: keep everything from the fork except PR #1's attachment
-      # package, to show whether that package alone changes the benchmark outcome.
       - name: Revert the attachment package to the upstream tag
         if: matrix.tree == 'fork-no-attachment'
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/${{ inputs.upstream_ref }}:refs/tags/baseline-upstream"
           git checkout refs/tags/baseline-upstream -- packages/attachment/attachment-local
-          git status --porcelain | head
 
       - name: Check out the fixed upstream tag in a worktree
         if: matrix.tree == 'upstream'
@@ -125,7 +263,6 @@ jobs:
           set -euo pipefail
           git fetch --no-tags --depth=1 https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/${{ inputs.upstream_ref }}:refs/tags/baseline-upstream"
           git worktree add ../baseline "refs/tags/baseline-upstream"
-          git -C ../baseline rev-parse HEAD
 
       - name: Record the checked-out commit
         id: tree
@@ -146,7 +283,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24.9'
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install (immutable)
         working-directory: ${{ steps.tree.outputs.dir }}
@@ -173,7 +310,7 @@ jobs:
           DSH_GATE_VERBOSE: '1'
           DSH_BENCH_REPORT_PHASE: last
         run: |
-          set -uo pipefail
+          set -o pipefail
           pnpm exec vitest run --config vitest.bench.config.ts --no-file-parallelism --maxWorkers=1 benchmarks/long-session-browser/long-session.bench.ts
           echo "bench_exit=$?"
 
@@ -181,3 +318,80 @@ jobs:
         if: always()
         run: |
           echo "tree=${{ matrix.tree }} sha=${{ steps.tree.outputs.sha }} bench_outcome=${{ steps.bench.outcome }}"
+
+  # The Python lane's minimal snapshot scenario, run against both trees. The runtime
+  # executable is the release-shaped single-exe build, the same one the Python workflow
+  # feeds to scripts/smoke-python-runtime.py.
+  baseline-python:
+    name: baseline python minimal snapshot (${{ matrix.tree }})
+    if: github.event_name == 'workflow_dispatch' && inputs.baseline == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [fork, upstream]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the fixed upstream tag in a worktree
+        if: matrix.tree == 'upstream'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/${{ inputs.upstream_ref }}:refs/tags/baseline-upstream"
+          git worktree add ../baseline "refs/tags/baseline-upstream"
+
+      - name: Record the checked-out commit
+        id: tree
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.tree }}" = "upstream" ]; then
+            echo "dir=../baseline" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git -C ../baseline rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=." >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install (immutable)
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the release-shaped single executable
+        working-directory: ${{ steps.tree.outputs.dir }}
+        env:
+          DSH_BUILD_CLIENT_PROFILE: official
+        run: pnpm exec tsx scripts/build-exe-for-python-sdk.ts --targets=node24-linux-x64 --build-artifacts
+
+      - name: Record the lockfile digest
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: sha256sum pnpm-lock.yaml
+
+      - name: Run the minimal Python snapshot scenario
+        id: smoke
+        working-directory: ${{ steps.tree.outputs.dir }}
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          env -u PYTHONPATH -u DSH_RUNTIME_MODE python3 scripts/smoke-python-runtime.py --scenario sdk-minimal --exe "$PWD/dist-exe/deepseek-harness-sdk-runtime-linux-x64" 2>&1 | tee python-smoke.log
+          echo "python_exit=$?"
+
+      - name: Model-visible diff and summary
+        if: always()
+        working-directory: ${{ steps.tree.outputs.dir }}
+        run: |
+          echo "tree=${{ matrix.tree }} sha=${{ steps.tree.outputs.sha }} python_outcome=${{ steps.smoke.outcome }}"
+          grep -n "model-visible\|AssertionError\|^---\|^+++\|^$" python-smoke.log | head -80 || true
